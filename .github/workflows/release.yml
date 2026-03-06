@@ -85,12 +85,15 @@ jobs:
 
   build-macos-intel:
     name: macOS Intel (x86_64)
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: brew install sdl3 freetype pcre2
+      - name: Install x86_64 system dependencies
+        # GitHub macOS ARM runners keep x86_64 Homebrew at /usr/local alongside
+        # the native ARM64 Homebrew at /opt/homebrew. Install the x86_64 variants
+        # so pkg-config finds the correct architecture libraries at link time.
+        run: arch -x86_64 /usr/local/bin/brew install sdl3 freetype pcre2
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -99,6 +102,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
+        env:
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
+          PKG_CONFIG_ALLOW_CROSS: "1"
         run: cargo build --release --target x86_64-apple-darwin
 
       - name: Create .app bundle
