@@ -496,7 +496,7 @@ fn fork_exec(
             // Change working directory.
             if let Some(ref cwd) = cwd_cs {
                 if libc::chdir(cwd.as_ptr()) == -1 {
-                    let err = *libc::__errno_location();
+                    let err = get_errno();
                     let _ = libc::write(
                         ctrl[1],
                         &err as *const c_int as *const libc::c_void,
@@ -515,7 +515,7 @@ fn fork_exec(
             libc::execvp(argv_ptrs[0], argv_ptrs.as_ptr());
 
             // exec failed — report errno through control pipe.
-            let err = *libc::__errno_location();
+            let err = get_errno();
             let _ = libc::write(
                 ctrl[1],
                 &err as *const c_int as *const libc::c_void,
@@ -569,6 +569,14 @@ fn fork_exec(
         detached: detach,
         fds: parent_fds,
     })))
+}
+
+/// Read the current errno value. Async-signal-safe.
+unsafe fn get_errno() -> c_int {
+    #[cfg(target_os = "linux")]
+    return *libc::__errno_location();
+    #[cfg(not(target_os = "linux"))]
+    return *libc::__error();
 }
 
 /// Close all still-valid FDs in the pipe/control arrays (error-path cleanup).

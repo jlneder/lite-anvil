@@ -1,4 +1,5 @@
 mod dirmonitor;
+#[cfg(unix)]
 mod process;
 mod regex;
 mod utf8extra;
@@ -931,6 +932,21 @@ fn make_window_handle(lua: &Lua) -> LuaResult<LuaTable> {
 
 // ── process module ────────────────────────────────────────────────────────────
 
+#[cfg(unix)]
 fn make_process(lua: &Lua) -> LuaResult<LuaTable> {
     process::make_module(lua)
+}
+
+#[cfg(not(unix))]
+fn make_process(lua: &Lua) -> LuaResult<LuaTable> {
+    let t = lua.create_table()?;
+    t.set(
+        "start",
+        lua.create_function(|_, _: LuaMultiValue| -> LuaResult<LuaValue> {
+            Err(LuaError::RuntimeError(
+                "process.start is not supported on this platform".into(),
+            ))
+        })?,
+    )?;
+    Ok(t)
 }
