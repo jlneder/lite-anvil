@@ -1,5 +1,26 @@
 # Changes Log
 
+## [0.1.0] - 2026-03-06 — Additional languages, bracket matching, replace in project, font size.
+
+### Added
+
+* Syntax highlighting for 9 new languages:
+  * **Rust** (`.rs`) — lifetimes, macros (`name!`), attributes (`#[...]`), raw strings
+  * **Kotlin** (`.kt`, `.kts`) — annotations, triple-quoted strings, coroutine keywords
+  * **Go** (`.go`) — backtick raw strings, built-in functions (`make`, `append`, `len`, …)
+  * **Bash** (`.sh`, `.bash`, `.zsh`, `.fish`) — shebang detection, `$VAR`/`${VAR}` variables, heredocs
+  * **Java** (`.java`) — annotations, text blocks, modern keywords (`record`, `sealed`, `permits`, `yield`)
+  * **C#** (`.cs`) — verbatim strings, attributes, modern keywords (`record`, `init`, `required`, `file`)
+  * **TOML** (`.toml`) — `[[array]]`/`[table]` headers, bare key highlighting, ISO 8601 dates
+  * **YAML** (`.yaml`, `.yml`) — anchors (`&`), aliases (`*`), tags (`!!str`), key detection
+  * **TypeScript** (`.ts`, `.tsx`, `.d.ts`) — decorators, template literals, utility types, TS-specific keywords
+
+* Bracket pair highlighting — when the cursor is adjacent to `(`, `)`, `[`, `]`, `{`, or `}`, both brackets are underlined using the theme accent color. Nesting is tracked correctly across lines.
+
+* Persistent font size — `Ctrl+-` decreases and `Ctrl++`/`Ctrl+=` increases the code font size. The chosen size is saved to disk and restored on next launch. `Ctrl+0` resets to the default.
+
+* **Project-wide replace** (`Ctrl+Shift+H`) — two-step command palette prompt (search term, then replacement). Scans the project and lists all matches identically to project-find. Press `F5` in the results view to apply all replacements atomically (files are written only when the match count is non-zero). A regex variant (`project-search:replace-regex`) is also available from the command palette.
+
 ## [0.0.0] - 2026-03-06 — First Rust release
 
 Initial port. Complete replacement of the C backend with Rust. The Lua editor layer is
@@ -18,6 +39,19 @@ unchanged; all Lite XL plugins targeting mod-version 4 should (could?) continue 
 
 * Meson + C toolchain removed; `cargo build --release` is the only build step
 * `cargo deb` produces a Debian package
+
+### Features
+
+* **Syntax highlighting** for 8 additional languages: Rust, Kotlin, Go, Bash,
+  Java, TOML, YAML, and TypeScript (`.ts`/`.tsx`)
+
+* **Bracket pair highlighting** — when the cursor is adjacent to a bracket,
+  its matching counterpart is underlined using the theme accent color.
+  Supports `(`, `)`, `[`, `]`, `{`, `}` with correct nesting across lines.
+
+* **Persistent font size** — `Ctrl+-` decreases and `Ctrl++` / `Ctrl+=`
+  increases the editor font size. The chosen size is saved to disk and
+  restored on next launch. `Ctrl+0` resets to the default.
 
 ## [2.1.7] - 2024-12-05
 

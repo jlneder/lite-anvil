@@ -5,6 +5,7 @@ local command = require "core.command"
 local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
+local storage = require "core.storage"
 local CommandView = require "core.commandview"
 local DocView = require "core.docview"
 
@@ -75,6 +76,7 @@ local function set_scale(scale)
   end
 
   core.redraw = true
+  storage.save("scale", "scale", scale)
 end
 
 local function get_scale()
@@ -97,6 +99,11 @@ if default_scale ~= config.plugins.scale.default_scale then
   if type(config.plugins.scale.default_scale) == "number" then
     set_scale(config.plugins.scale.default_scale)
   end
+end
+
+local saved_scale = storage.load("scale", "scale")
+if type(saved_scale) == "number" then
+  set_scale(saved_scale)
 end
 
 -- The config specification used by gui generators
@@ -170,9 +177,10 @@ command.add(nil, {
 })
 
 keymap.add {
-  ["ctrl+0"] = "scale:reset",
-  ["ctrl+-"] = "scale:decrease",
-  ["ctrl+="] = "scale:increase"
+  ["ctrl+0"]       = "scale:reset",
+  ["ctrl+-"]       = "scale:decrease",
+  ["ctrl+="]       = "scale:increase",
+  ["ctrl+shift+="] = "scale:increase",
 }
 
 if config.plugins.scale.use_mousewheel then
