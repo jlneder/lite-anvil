@@ -66,6 +66,13 @@ fn sdl_error() -> String {
 /// Initialise SDL3 video subsystem. Must be called once on the main thread before
 /// the Lua VM starts.
 pub fn init() -> Result<()> {
+    unsafe {
+        SDL_SetAppMetadata(
+            c"Lite Anvil".as_ptr(),
+            c"0.1.1".as_ptr(),
+            c"com.lite_anvil.LiteAnvil".as_ptr(),
+        );
+    }
     let ok = unsafe { SDL_Init(SDL_INIT_VIDEO) };
     if !ok {
         return Err(anyhow::anyhow!("SDL3 init failed: {}", sdl_error()));
@@ -194,7 +201,7 @@ pub fn create_window(title: &str) -> Result<()> {
         let height = (bounds.h * 80 / 100).max(300);
 
         let title_cstr = CString::new(title).unwrap_or_default();
-        let flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        let flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
         let win = unsafe { SDL_CreateWindow(title_cstr.as_ptr(), width, height, flags) };
         if win.is_null() {
             return Err(anyhow::anyhow!("window creation failed: {}", sdl_error()));
@@ -202,9 +209,6 @@ pub fn create_window(title: &str) -> Result<()> {
 
         // Set the application icon.
         set_window_icon(win);
-
-        // Enable text input so SDL_EVENT_TEXT_INPUT events are dispatched.
-        unsafe { SDL_StartTextInput(win) };
 
         let mut lw = 0i32;
         let mut lh = 0i32;
@@ -252,6 +256,20 @@ pub fn show_window() {
         if let Some(ref mut st) = *s.borrow_mut() {
             if let Some(ref w) = st.window {
                 unsafe { SDL_ShowWindow(w.raw) };
+            }
+        }
+    });
+}
+
+/// Show the window if it was created hidden and has not yet been shown.
+/// Called after the first rendered frame to avoid startup flicker.
+pub fn show_if_hidden() {
+    SDL.with(|s| {
+        if let Some(ref st) = *s.borrow() {
+            if let Some(ref w) = st.window {
+                if (unsafe { SDL_GetWindowFlags(w.raw) } & SDL_WINDOW_HIDDEN).0 != 0 {
+                    unsafe { SDL_ShowWindow(w.raw) };
+                }
             }
         }
     });
@@ -627,19 +645,6 @@ fn translate_event(state: &mut SdlState, event: SDL_Event) -> PollResult {
     }
 
     if t == SDL_EVENT_WINDOW_FOCUS_GAINED {
-        // Drain pending key events that SDL queued while unfocused.
-        loop {
-            let mut next_e = SDL_Event::default();
-            if !unsafe { SDL_PollEvent(&mut next_e) } {
-                break;
-            }
-            let nt = unsafe { next_e.r#type };
-            if nt == SDL_EVENT_KEY_DOWN.0 || nt == SDL_EVENT_KEY_UP.0 {
-                continue;
-            }
-            state.pending_event = Some(next_e);
-            break;
-        }
         return PollResult::Event(vec![Str("focusgained")]);
     }
 
@@ -674,7 +679,7 @@ fn translate_event(state: &mut SdlState, event: SDL_Event) -> PollResult {
     }
 
     if t == SDL_EVENT_TEXT_EDITING {
-        let text_ptr = unsafe { event.edit.text };
+        let (text_ptr, start, length) = unsafe { (event.edit.text, event.edit.start, event.edit.length) };
         let text = if text_ptr.is_null() {
             std::string::String::new()
         } else {
@@ -682,7 +687,12 @@ fn translate_event(state: &mut SdlState, event: SDL_Event) -> PollResult {
                 .to_string_lossy()
                 .into_owned()
         };
-        return PollResult::Event(vec![Str("textediting"), String(text)]);
+        return PollResult::Event(vec![
+            Str("textediting"),
+            String(text),
+            Int(start as i64),
+            Int(length as i64),
+        ]);
     }
 
     if t == SDL_EVENT_MOUSE_BUTTON_DOWN || t == SDL_EVENT_MOUSE_BUTTON_UP {

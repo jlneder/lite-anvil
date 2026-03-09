@@ -284,6 +284,8 @@ function NagView:next()
     -- self.target_height is the nagview height needed to display the message and
     -- the buttons, excluding the top and bottom padding space.
     self.target_height = math.max(message_height, self:get_buttons_height())
+    self.show_height = self:get_target_height()
+    self.dim_alpha = 1
     self:change_hovered(common.find_index(self.options, "default_yes"))
 
     self.force_focus = true

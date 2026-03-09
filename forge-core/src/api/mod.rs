@@ -330,14 +330,6 @@ fn make_system(lua: &Lua) -> LuaResult<LuaTable> {
         })?,
     )?;
 
-    // ── Window & event — SDL3 or headless stubs ───────────────────────────────
-
-    #[cfg(feature = "sdl")]
-    add_sdl_system_fns(lua, &t)?;
-
-    #[cfg(not(feature = "sdl"))]
-    add_headless_system_fns(lua, &t)?;
-
     // ── Directory removal ──────────────────────────────────────────────────
 
     t.set(
@@ -504,6 +496,14 @@ fn make_system(lua: &Lua) -> LuaResult<LuaTable> {
         "set_text_input_rect",
         lua.create_function(|_, _: LuaMultiValue| Ok(()))?,
     )?;
+
+    // ── Window & event — SDL3 overrides stubs above ────────────────────────
+
+    #[cfg(feature = "sdl")]
+    add_sdl_system_fns(lua, &t)?;
+
+    #[cfg(not(feature = "sdl"))]
+    add_headless_system_fns(lua, &t)?;
 
     Ok(t)
 }

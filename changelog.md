@@ -1,4 +1,6 @@
-# Changes Log
+# Change Log
+
+## [0.1.1] - 2026-03-08 — Clipboard fix, initial render fix, dialog render fix.
 
 ## [0.1.0] - 2026-03-06 — Additional languages, bracket matching, replace in project, font size.
 

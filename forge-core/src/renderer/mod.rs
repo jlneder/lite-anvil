@@ -213,6 +213,7 @@ pub fn make_renderer(lua: &Lua) -> LuaResult<LuaTable> {
                             sdl_rects.len() as libc::c_int,
                         );
                     }
+                    crate::window::show_if_hidden();
                 });
             });
             Ok(())

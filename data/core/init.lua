@@ -903,6 +903,7 @@ function core.on_event(type, ...)
       callback(status, result)
     end
   elseif type == "focuslost" then
+    keymap.modkeys = {}
     core.root_view:on_focus_lost(...)
   elseif type == "quit" then
     core.quit()
