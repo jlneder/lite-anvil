@@ -1,6 +1,6 @@
 [package]
 name = "forge-core"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Lite-Anvil text editor — Rust core"
@@ -50,6 +50,9 @@ notify = "8.2.0"
 
 # PCRE2 regex — requires libpcre2-dev.
 pcre2 = "0.2.11"
+
+# Markdown parsing for the preview pane
+pulldown-cmark = { version = "0.12", default-features = false }
 
 # PNG decoding for the window icon
 png = "0.17"

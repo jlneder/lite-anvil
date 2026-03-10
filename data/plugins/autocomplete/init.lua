@@ -1,14 +1,15 @@
 -- mod-version:4
-local core = require "core"
-local common = require "core.common"
-local config = require "core.config"
-local command = require "core.command"
-local style = require "core.style"
-local keymap = require "core.keymap"
+local core      = require "core"
+local common    = require "core.common"
+local config    = require "core.config"
+local command   = require "core.command"
+local style     = require "core.style"
+local keymap    = require "core.keymap"
 local translate = require "core.doc.translate"
-local RootView = require "core.rootview"
-local DocView = require "core.docview"
-local Doc = require "core.doc"
+local RootView  = require "core.rootview"
+local DocView   = require "core.docview"
+local Doc       = require "core.doc"
+local drawing   = require "plugins.autocomplete.drawing"
 
 ---Symbols cache of all open documents
 ---@type table<core.doc, table>
@@ -151,13 +152,13 @@ function autocomplete.add(t, manually_triggered)
         items,
         setmetatable(
           {
-            text = text,
-            info = info.info,
-            icon = info.icon,          -- Name of icon to show
-            desc = info.desc,          -- Description shown on item selected
-            onhover = info.onhover,    -- A callback called once when item is hovered
-            onselect = info.onselect,  -- A callback called when item is selected
-            data = info.data           -- Optional data that can be used on cb
+            text     = text,
+            info     = info.info,
+            icon     = info.icon,         -- Name of icon to show
+            desc     = info.desc,         -- Description shown on item selected
+            onhover  = info.onhover,      -- A callback called once when item is hovered
+            onselect = info.onselect,     -- A callback called when item is selected
+            data     = info.data          -- Optional data that can be used on cb
           },
           mt
         )
@@ -169,22 +170,22 @@ function autocomplete.add(t, manually_triggered)
   end
 
   if not manually_triggered then
-    autocomplete.map[t.name] =  { files = t.files or ".*", items = items }
+    autocomplete.map[t.name] = { files = t.files or ".*", items = items }
   else
-    autocomplete.map_manually[t.name] =  { files = t.files or ".*", items = items }
+    autocomplete.map_manually[t.name] = { files = t.files or ".*", items = items }
   end
 end
 
 --
--- Thread that scans open document symbols and cache them
+-- Thread that scans open document symbols and caches them
 --
 local global_symbols = {}
 
 core.add_thread(function()
   local function load_syntax_symbols(doc)
-    if doc.syntax and not autocomplete.map["language_"..doc.syntax.name] then
+    if doc.syntax and not autocomplete.map["language_" .. doc.syntax.name] then
       local symbols = {
-        name = "language_"..doc.syntax.name,
+        name  = "language_" .. doc.syntax.name,
         files = doc.syntax.files,
         items = {}
       }
@@ -218,8 +219,8 @@ core.add_thread(function()
               filename_message = "unnamed document"
             end
             core.status_view:show_message("!", style.accent,
-              "Too many symbols in "..filename_message..
-              ": stopping auto-complete for this document according to "..
+              "Too many symbols in " .. filename_message ..
+              ": stopping auto-complete for this document according to " ..
               "config.plugins.autocomplete.max_symbols."
             )
             collectgarbage('collect')
@@ -276,7 +277,6 @@ core.add_thread(function()
         end
       end
     end
-
   end
 end)
 
@@ -306,11 +306,7 @@ local function update_suggestions()
   local doc = core.active_view.doc
   local filename = doc and doc.filename or ""
 
-  local map = autocomplete.map
-
-  if triggered_manually then
-    map = autocomplete.map_manually
-  end
+  local map = triggered_manually and autocomplete.map_manually or autocomplete.map
 
   local assigned_sym = {}
 
@@ -341,9 +337,7 @@ local function update_suggestions()
           if cache[d].symbols then
             for name in pairs(cache[d].symbols) do
               if not assigned_sym[name] then
-                table.insert(items, setmetatable(
-                  {text = name, info = "normal"}, mt
-                ))
+                table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
               end
             end
           end
@@ -354,7 +348,7 @@ local function update_suggestions()
     if text_symbols then
       for name in pairs(text_symbols) do
         if not assigned_sym[name] then
-          table.insert(items, setmetatable({text = name, info = "normal"}, mt))
+          table.insert(items, setmetatable({ text = name, info = "normal" }, mt))
         end
       end
     end
@@ -387,293 +381,15 @@ local function get_active_view()
   end
 end
 
-local last_max_width = 0
-local function get_suggestions_rect(av)
-  if #suggestions == 0 then
-    last_max_width = 0
-    return 0, 0, 0, 0
-  end
-
-  local line, col = av.doc:get_selection()
-  local x, y = av:get_line_screen_position(line, col - #partial)
-  y = y + av:get_line_height() + style.padding.y
-  local font = av:get_font()
-  local th = font:get_height()
-  local has_icons = false
-  local hide_info = config.plugins.autocomplete.hide_info
-  local hide_icons = config.plugins.autocomplete.hide_icons
-
-  local ah = config.plugins.autocomplete.max_height
-
-  local max_items = math.min(ah, #suggestions)
-
-  local show_count = math.min(#suggestions, ah)
-  local start_index = math.max(suggestions_idx-(ah-1), 1)
-
-  local max_width = 0
-  local max_l_icon_width = 0
-  for i = start_index, start_index + show_count - 1 do
-    local s = suggestions[i]
-    local w = font:get_width(s.text)
-    if s.info and not hide_info then
-      w = w + style.font:get_width(s.info) + style.padding.x
-    end
-    local icon = s.icon or s.info
-    if not hide_icons and icon and autocomplete.icons[icon] then
-      local icon_width = autocomplete.icons[icon].font:get_width(
-        autocomplete.icons[icon].char
-      )
-      if config.plugins.autocomplete.icon_position == "left" then
-        max_l_icon_width = math.max(max_l_icon_width, icon_width + (style.padding.x / 2))
-      end
-      w = w + icon_width + (style.padding.x / 2)
-      has_icons = true
-    end
-    max_width = math.max(max_width, w)
-  end
-  max_width = math.max(last_max_width, max_width)
-  last_max_width = max_width
-
-  max_width = max_width + style.padding.x * 2
-  x = x - style.padding.x - max_l_icon_width
-
-  -- additional line to display total items
-  max_items = max_items + 1
-
-  if max_width > core.root_view.size.x then
-    max_width = core.root_view.size.x
-  end
-  if max_width < 150 * SCALE then
-    max_width = 150 * SCALE
-  end
-
-  -- if portion not visiable to right, reposition to DocView right margin
-  if x + max_width > core.root_view.size.x then
-    x = (av.size.x + av.position.x) - max_width
-  end
-
-  return
-    x,
-    y - style.padding.y,
-    max_width,
-    max_items * (th + style.padding.y) + style.padding.y,
-    has_icons
-end
-
-local function wrap_line(line, max_chars)
-  if #line > max_chars then
-    local lines = {}
-    local line_len = #line
-    local new_line = ""
-    local prev_char = ""
-    local position = 0
-    local indent = line:match("^%s+")
-    for char in line:gmatch(".") do
-      position = position + 1
-      if #new_line < max_chars then
-        new_line = new_line .. char
-        prev_char = char
-        if position >= line_len then
-          table.insert(lines, new_line)
-        end
-      else
-        if
-          not prev_char:match("%s")
-          and
-          not string.sub(line, position+1, 1):match("%s")
-          and
-          position < line_len
-        then
-          new_line = new_line .. "-"
-        end
-        table.insert(lines, new_line)
-        if indent then
-          new_line = indent .. char
-        else
-          new_line = char
-        end
-      end
-    end
-    return lines
-  end
-  return line
-end
-
-local previous_scale = SCALE
-local desc_font = style.code_font:copy(
-  config.plugins.autocomplete.desc_font_size * SCALE
-)
-local function draw_description_box(text, av, sx, sy, sw, sh)
-  if previous_scale ~= SCALE then
-    desc_font = style.code_font:copy(
-      config.plugins.autocomplete.desc_font_size * SCALE
-    )
-    previous_scale = SCALE
-  end
-
-  local font = desc_font
-  local lh = font:get_height()
-  local y = sy + style.padding.y
-  local x = sx + sw + style.padding.x / 4
-  local width = 0
-  local char_width = font:get_width(" ")
-  local draw_left = false;
-
-  local max_chars = 0
-  if sx - av.position.x < av.size.x - (sx - av.position.x) - sw then
-    max_chars = (((av.size.x+av.position.x) - x) / char_width) - 5
-  else
-    draw_left = true;
-    max_chars = (
-      (sx - av.position.x - (style.padding.x / 4) - style.scrollbar_size)
-      / char_width
-    ) - 5
-  end
-
-  local lines = {}
-  for line in string.gmatch(text.."\n", "(.-)\n") do
-    local wrapper_lines = wrap_line(line, max_chars)
-    if type(wrapper_lines) == "table" then
-      for _, wrapped_line in pairs(wrapper_lines) do
-        width = math.max(width, font:get_width(wrapped_line))
-        table.insert(lines, wrapped_line)
-      end
-    else
-      width = math.max(width, font:get_width(line))
-      table.insert(lines, line)
-    end
-  end
-
-  if draw_left then
-    x = sx - (style.padding.x / 4) - width - (style.padding.x * 2)
-  end
-
-  local height = #lines * font:get_height()
-
-  -- draw background rect
-  renderer.draw_rect(
-    x,
-    sy,
-    width + style.padding.x * 2,
-    height + style.padding.y * 2,
-    style.background3
-  )
-
-  -- draw text
-  for _, line in pairs(lines) do
-    common.draw_text(
-      font, style.text, line, "left",
-      x + style.padding.x, y, width, lh
-    )
-    y = y + lh
-  end
-end
-
-local function draw_suggestions_box(av)
-  if #suggestions <= 0 then
-    return
-  end
-
-  local ah = config.plugins.autocomplete.max_height
-
-  -- draw background rect
-  local rx, ry, rw, rh, has_icons = get_suggestions_rect(av)
-  renderer.draw_rect(rx, ry, rw, rh, style.background3)
-
-  -- draw text
-  local font = av:get_font()
-  local lh = font:get_height() + style.padding.y
-  local y = ry + style.padding.y / 2
-  local show_count = math.min(#suggestions, ah)
-  local start_index = suggestions_offset
-  local hide_info = config.plugins.autocomplete.hide_info
-
-  for i=start_index, start_index+show_count-1, 1 do
-    if not suggestions[i] then
-      break
-    end
-    local s = suggestions[i]
-
-    local icon_l_padding, icon_r_padding = 0, 0
-
-    if has_icons then
-      local icon = s.icon or s.info
-      if icon and autocomplete.icons[icon] then
-        local ifont = autocomplete.icons[icon].font
-        local itext = autocomplete.icons[icon].char
-        local icolor = autocomplete.icons[icon].color
-        if i == suggestions_idx then
-          icolor = style.accent
-        elseif type(icolor) == "string" then
-          icolor = style.syntax[icolor]
-        end
-        if config.plugins.autocomplete.icon_position == "left" then
-          common.draw_text(
-            ifont, icolor, itext, "left", rx + style.padding.x, y, rw, lh
-          )
-          icon_l_padding = ifont:get_width(itext) + (style.padding.x / 2)
-        else
-          common.draw_text(
-            ifont, icolor, itext, "right", rx, y, rw - style.padding.x, lh
-          )
-          icon_r_padding = ifont:get_width(itext) + (style.padding.x / 2)
-        end
-      end
-    end
-
-    local info_size = style.font:get_width(s.info) + style.padding.x
-
-    local color = (i == suggestions_idx) and style.accent or style.text
-    -- Push clip to avoid that the suggestion text gets drawn over suggestion type/icon
-    core.push_clip_rect(rx + icon_l_padding + style.padding.x, y,
-                        rw - info_size - icon_l_padding - icon_r_padding - style.padding.x, lh)
-    local x_adv = common.draw_text(
-      font, color, s.text, "left",
-      rx + icon_l_padding + style.padding.x, y, rw, lh
-    )
-    core.pop_clip_rect()
-    -- If the text wasn't fully visible, draw an ellipsis
-    if x_adv > rx + rw - info_size - icon_r_padding then
-      local ellipsis_size = font:get_width("…")
-      local ell_x = rx + rw - info_size - icon_r_padding - ellipsis_size
-      renderer.draw_rect(ell_x, y, ellipsis_size, lh, style.background3)
-      common.draw_text(font, color, "…", "left", ell_x, y, ellipsis_size, lh)
-    end
-    if s.info and not hide_info then
-      color = (i == suggestions_idx) and style.text or style.dim
-      common.draw_text(
-        style.font, color, s.info, "right",
-        rx, y, rw - icon_r_padding - style.padding.x, lh
-      )
-    end
-    y = y + lh
-    if suggestions_idx == i then
-      if s.onhover then
-        s.onhover(suggestions_idx, s)
-        s.onhover = nil
-      end
-      if s.desc and #s.desc > 0 then
-        draw_description_box(s.desc, av, rx, ry, rw, rh)
-      end
-    end
-  end
-
-  renderer.draw_rect(rx, y, rw, 2, style.caret)
-  renderer.draw_rect(rx, y+2, rw, lh, style.background)
-  common.draw_text(
-    style.font,
-    style.accent,
-    "Items",
-    "left",
-    rx + style.padding.x, y, rw, lh
-  )
-  common.draw_text(
-    style.font,
-    style.accent,
-    tostring(suggestions_idx) .. "/" .. tostring(#suggestions),
-    "right",
-    rx, y, rw - style.padding.x, lh
-  )
+-- Builds the context table consumed by drawing functions.
+local function make_ctx()
+  return {
+    suggestions        = suggestions,
+    suggestions_idx    = suggestions_idx,
+    suggestions_offset = suggestions_offset,
+    partial            = partial,
+    icons              = autocomplete.icons,
+  }
 end
 
 local function show_autocomplete()
@@ -689,8 +405,7 @@ local function show_autocomplete()
         last_line, last_col = av.doc:get_selection()
       else
         local line, col = av.doc:get_selection()
-        local char = av.doc:get_char(line, col-1, line, col-1)
-
+        local char = av.doc:get_char(line, col - 1, line, col - 1)
         if char:match("%s") or (char:match("%p") and col ~= last_col) then
           reset_suggestions()
         end
@@ -700,7 +415,7 @@ local function show_autocomplete()
     end
 
     -- scroll if rect is out of bounds of view
-    local _, y, _, h = get_suggestions_rect(av)
+    local _, y, _, h = drawing.get_suggestions_rect(make_ctx(), av)
     local limit = av.position.y + av.size.y
     if y + h > limit then
       av.scroll.to.y = av.scroll.y + y + h - limit
@@ -759,7 +474,7 @@ RootView.draw = function(...)
   local av = get_active_view()
   if av then
     -- draw suggestions box after everything else
-    core.root_view:defer_draw(draw_suggestions_box, av)
+    core.root_view:defer_draw(drawing.draw_suggestions_box, make_ctx(), av)
   end
 end
 
@@ -818,14 +533,14 @@ function autocomplete.add_icon(name, character, font, color)
     "invalid icon color given"
   )
   autocomplete.icons[name] = {
-    char = character,
-    font = font or style.code_font,
+    char  = character,
+    font  = font or style.code_font,
     color = color or "keyword"
   }
 end
 
 --
--- Register built-in syntax symbol types icon
+-- Register built-in syntax symbol type icons
 --
 for name, _ in pairs(style.syntax) do
   autocomplete.add_icon(name, "M", style.icon_font, name)
@@ -841,7 +556,7 @@ end
 
 command.add(predicate, {
   ["autocomplete:complete"] = function(dv)
-    local doc = dv.doc
+    local doc  = dv.doc
     local item = suggestions[suggestions_idx]
     local inserted = false
     if item.onselect then
@@ -852,11 +567,11 @@ command.add(predicate, {
       local sz = #current_partial
 
       for _, line1, col1, line2, _ in doc:get_selections(true) do
-        local n = col1 - 1
+        local n    = col1 - 1
         local line = doc.lines[line1]
         for i = 1, sz + 1 do
-          local j = sz - i
-          local subline = line:sub(n - j, n)
+          local j        = sz - i
+          local subline   = line:sub(n - j, n)
           local subpartial = current_partial:sub(i, -1)
           if subpartial == subline then
             doc:remove(line1, col1, line2, n - j)

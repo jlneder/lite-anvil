@@ -1,4 +1,5 @@
 mod dirmonitor;
+mod markdown;
 #[cfg(unix)]
 mod process;
 mod regex;
@@ -186,6 +187,9 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
 
     let dm = dirmonitor::make_module(lua)?;
     insert(&globals, &pkg_loaded, "dirmonitor", dm)?;
+
+    let md = markdown::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "markdown", md)?;
 
     Ok(())
 }

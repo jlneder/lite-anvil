@@ -1,5 +1,20 @@
 # Change Log
 
+## [0.2.0] - 2026-03-10 — Adding markdown preview.
+
+### Added
+
+* Markdown preview pane (`Ctrl+Shift+M` on any `.md` / `.markdown` file) rendered
+  natively using pulldown-cmark: headings, paragraphs, bold/italic (colour
+  differentiated), inline and fenced code blocks, blockquotes, ordered and
+  unordered lists, horizontal rules, and tables with column alignment.
+* Clickable links — left-click any link or image reference to open it with
+  `xdg-open` (Linux) or `open` (macOS).
+* Table rendering with equal-width columns, header highlighting, and border lines
+  derived from the active theme.
+* Preview stays in sync with the editor in real time; layout reflows when the
+  pane is resized.
+
 ## [0.1.1] - 2026-03-08 — Clipboard fix, initial render fix, dialog render fix.
 
 ## [0.1.0] - 2026-03-06 — Additional languages, bracket matching, replace in project, font size.

@@ -1,9 +1,10 @@
-local core = require "core"
-local common = require "core.common"
-local config = require "core.config"
-local keymap = require "core.keymap"
-local style = require "core.style"
-local View = require "core.view"
+local core    = require "core"
+local common  = require "core.common"
+local config  = require "core.config"
+local command = require "core.command"
+local keymap  = require "core.keymap"
+local style   = require "core.style"
+local View    = require "core.view"
 
 
 local function lines(text)
@@ -46,8 +47,10 @@ function LogView:new()
   self.expanding = {}
   self.scrollable = true
   self.yoffset = 0
+  self.selected = nil
 
-  core.status_view:show_message("i", style.text, "ctrl+click to copy entry")
+  core.status_view:show_message("i", style.text,
+    "click to select  \xc2\xb7  ctrl+c to copy entry  \xc2\xb7  ctrl+a to copy all")
 end
 
 
@@ -111,9 +114,10 @@ function LogView:on_mouse_pressed(button, px, py, clicks)
   end
 
   if selected then
+    self.selected = selected
     if keymap.modkeys["ctrl"] then
       system.set_clipboard(core.get_log(selected))
-      core.status_view:show_message("i", style.text, "copied entry #"..index.." to clipboard.")
+      core.status_view:show_message("i", style.text, "copied entry #"..index.." to clipboard")
     else
       self:expand_item(selected)
     end
@@ -180,6 +184,9 @@ function LogView:draw()
   local tw = style.font:get_width(datestr)
   for _, item, x, y, w, h in self:each_item() do
     if y + h >= self.position.y and y <= self.position.y + self.size.y then
+      if item == self.selected then
+        renderer.draw_rect(x, y, w, h, style.line_highlight)
+      end
       core.push_clip_rect(x, y, w, h)
       x = x + style.padding.x
 
@@ -222,5 +229,29 @@ function LogView:draw()
   end
   LogView.super.draw_scrollbar(self)
 end
+
+local function is_log_view()
+  return core.active_view:is(LogView), core.active_view
+end
+
+command.add(is_log_view, {
+  ["log:copy-entry"] = function(lv)
+    if lv.selected then
+      system.set_clipboard(core.get_log(lv.selected))
+      core.status_view:show_message("i", style.text, "copied entry to clipboard")
+    else
+      core.status_view:show_message("i", style.text, "no entry selected")
+    end
+  end,
+  ["log:copy-all"] = function()
+    system.set_clipboard(core.get_log())
+    core.status_view:show_message("i", style.text, "copied all log entries to clipboard")
+  end,
+})
+
+keymap.add {
+  ["ctrl+c"] = "log:copy-entry",
+  ["ctrl+a"] = "log:copy-all",
+}
 
 return LogView

@@ -91,7 +91,7 @@ syntax.add {
   ---- Markdown rules
     -- math
     { pattern = { "%$%$", "%$%$", "\\"  },  type = "string", syntax = ".tex"},
-    { regex   = { "\\$", [[\$|(?=\\*\n)]], "\\" },  type = "string", syntax = ".tex"},
+    { regex   = { "\\$", [[\$|\n]], "\\" },           type = "string", syntax = ".tex"},
     -- code blocks
     { pattern = { "```caddyfile", "```" },  type = "string", syntax = "Caddyfile" },
     { pattern = { "```c++", "```" },        type = "string", syntax = ".cpp" },
