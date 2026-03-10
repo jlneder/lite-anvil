@@ -1,6 +1,6 @@
 [package]
 name = "forge-core"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Lite-Anvil text editor — Rust core"
@@ -67,4 +67,3 @@ anyhow = "1.0.102"
 once_cell = "1.21.3"
 parking_lot = "0.12.5"
 crossbeam-channel = "0.5.15"
-
