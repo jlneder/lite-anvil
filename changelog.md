@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.2.6] - 2026-03-11 — Markdown + fonts.
+
+* Switching to [Lilex Font](https://github.com/mishamyrt/Lilex)
+* Further markdown rendering fix.
+
 ## [0.2.5] - 2026-03-10 — Fixes and polish.
 
 * Fixing markdown rendering bugs.

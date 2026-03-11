@@ -143,9 +143,7 @@ local style = require "core.style"
 
 ------------------------------- Fonts ----------------------------------------
 
--- customize fonts:
--- style.font = renderer.font.load(DATADIR .. "/fonts/FiraSans-Regular.ttf", 14 * SCALE)
--- style.code_font = renderer.font.load(DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", 14 * SCALE)
+-- customize fonts in data/core/style.lua
 --
 -- DATADIR is the location of the installed Lite-Anvil Lua code, default color
 -- schemes and fonts.

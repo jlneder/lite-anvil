@@ -19,6 +19,14 @@ local function list_item_gap(gap)
   return math.max(2, math.floor(gap * 0.5))
 end
 
+function M.code_block_line_count(text)
+  local lines = 0
+  for _ in (text .. "\n"):gmatch("[^\n]*\n") do
+    lines = lines + 1
+  end
+  return math.max(1, lines)
+end
+
 -- Simulate word-wrap and return the pixel height of the inline span list.
 function M.inlines_height(inlines, width, fonts)
   if not inlines or #inlines == 0 then return 0 end
@@ -57,9 +65,7 @@ function M.block_height(blk, width, fonts, gap)
   elseif t == "paragraph" then
     return M.inlines_height(blk.inlines, width, fonts)
   elseif t == "code_block" then
-    local lines = 0
-    for _ in (blk.text .. "\n"):gmatch("[^\n]+") do lines = lines + 1 end
-    return math.max(1, lines) * clh + gap * 2
+    return M.code_block_line_count(blk.text) * clh + gap * 2
   elseif t == "blockquote" then
     local pad = quote_padding(gap)
     local block_gap = quote_block_gap(gap)

@@ -80,6 +80,10 @@ If the app was quarantined by Gatekeeper, remove the quarantine attribute:
 sudo xattr -dr com.apple.quarantine /Applications/LiteAnvil.app
 ```
 
+### Other Notes
+
+Font: [Lilex](https://github.com/mishamyrt/Lilex)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
