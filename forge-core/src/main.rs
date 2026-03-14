@@ -33,6 +33,10 @@ fn run_loop(args: &[String]) -> anyhow::Result<()> {
             return Ok(());
         }
         log::info!("restarting Lua VM");
+        // Release any FontRef arcs held by the previous frame's draw commands
+        // before the new Lua VM loads fonts on the same FT_Library.
+        #[cfg(feature = "sdl")]
+        crate::renderer::reset_cache();
         #[cfg(feature = "sdl")]
         window::prepare_restart();
     }

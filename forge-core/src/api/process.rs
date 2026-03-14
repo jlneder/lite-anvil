@@ -273,7 +273,9 @@ fn g_read(lua: &Lua, inner: &mut ProcessInner, fd_idx: usize, n: usize) -> LuaRe
             total += ret as usize;
             remaining -= ret as usize;
         } else if ret == 0 {
-            // EOF — child closed its write end.
+            // EOF — close the read end so subsequent calls return nil,
+            // allowing process.stream:read() loops to break cleanly.
+            inner.close_fd(fd_idx);
             inner.poll(WAIT_NONE);
             break;
         } else {

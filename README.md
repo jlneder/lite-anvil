@@ -62,6 +62,14 @@ Usage:
 
 The mount is cleaned up when the remote project is removed from the session.
 
+Useful shortcuts:
+
+- `Ctrl+P` runs the command palette.
+- `Ctrl+Shift+O` opens a file from the current project.
+- `Ctrl+Alt+O` opens a project folder.
+- `Ctrl+T` shows document symbols through LSP when available.
+- `Ctrl+Alt+T` shows workspace symbols through LSP when available.
+
 ## Building
 
 ### Dependencies

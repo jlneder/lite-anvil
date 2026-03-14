@@ -1,24 +1,47 @@
 # Change Log
 
+## [0.5.0] - 2026-03-14 — LSP, terminal, Git, and project workflow upgrades, fixes.
+
+* Added built-in LSP support with startup enabled by default, project lsp.json config, completion, hover, definition/type-definition/implementation, references, rename, symbols, code actions, formatting, signature help, diagnostics, and restart/refresh commands.
+* Added semantic token overlays on top of the core tokenizer/highlighter instead of replacing syntax highlighting.
+* Switched the default editor theme.
+* Improved Rust syntax highlighting so attribute arguments like `#[arg(help = \"...\")]` keep string coloring.
+* Added a PTY-backed embedded terminal with shell tabs, ANSI color handling, scrollback, resize support, color schemes, rename support, and terminal open/close/clear actions.
+* Added .gitignore awareness for project scanning so file tree, open-file, project search, and project replace respect repository ignore rules, with optional extra ignore patterns in config.
+* Improved project search with hierarchical file-grouped results and optional path glob filters.
+* Improved project-wide replace with optional path glob filters and configurable .bak backup creation before writes.
+* Added Git integration with cached repo status, branch display in the status bar, treeview change highlighting, a Git status panel, diff views, and basic commit/pull/push/checkout/branch/stash/stage/unstage commands.
+* Added configuration toggles for LSP startup, semantic highlighting, inline diagnostics, terminal behavior, Git status refresh, tree highlighting, and replace backups.
+* Added persistent treeview sidebar width, so manual sidebar resizing is restored on restart.
+* Reload file on regaining focus, check if state is dirty.
+* Added syntax highlighting for PowerShell, CSV, D, Haskell, Zig, TSX, Vue, Svelte, Julia, Lisp, Makefile, Meson, Crystal, fstab, Gleam, PostgreSQL, and OCaml.
+* Fixed segfault when restarting with a terminal open in a split panel: the renderer command cache is now cleared between restarts to release all font references cleanly.
+* Fixed terminal nil crash when an ANSI color palette index falls outside the configured scheme range.
+* Fixed Git status view hanging indefinitely on EOF.
+* Removed the bouncing-icon easter egg from the status bar.
+* Terminal tabs now close automatically when the shell exits.
+* Added `root:reset-layout` command to collapse all split panels back to a single panel while keeping all open files.
+* Open files and terminal windows are now saved and restored across restarts.
+
 ## [0.4.0] - 2026-03-12 — Startup loading optimizations, SDL tuning, and fixes.
 
-* Load `language_*.lua` syntax plugins lazily on first matching file/header instead of at editor startup.
+* Load language_*.lua syntax plugins lazily on first matching file/header instead of at editor startup.
 * Lazy-load selected command-driven plugins on first use instead of at startup, including Markdown preview, project search, project replace, and remote SSH.
 * Delay loading of large display-only fonts until they are first used by the welcome screen or toolbar.
-* Lazy-initialize native `regex` and `markdown` modules, and defer plugin metadata regex compilation until plugin scanning actually needs it.
+* Lazy-initialize native regex and markdown modules, and defer plugin metadata regex compilation until plugin scanning actually needs it.
 * Reduce the default startup window/backbuffer footprint by using usable display bounds and clamping oversized initial HiDPI backbuffers.
 * Remove internal uses of deprecated project-path helper functions to avoid deprecation warnings in normal editor workflows.
-* Fix Rust lifetime highlighting so `&'static str` is no longer tokenized as a quoted string.
+* Fix Rust lifetime highlighting so &'static str is no longer tokenized as a quoted string.
 
 ## [0.3.1] - 2026-03-11 — Release binary size optimization.
 
 ## [0.3.0] - 2026-03-11 — Config + editing upgrades and language support.
 
-* Moved editor fonts, theme colors, syntax colors, and UI style tuning into `config.lua`
+* Moved editor fonts, theme colors, syntax colors, and UI style tuning into config.lua
 * Added long-line indicator
 * Added log font controls
 * Multi-selection editing commands, including find-to-multi-cursor selection of all matches at once.
-* Remote SSH project mounting via `sshfs`.
+* Remote SSH project mounting via sshfs.
 * Added syntax highlighting for F#, SQL, PHP, Assembly, Ruby, Dart, Swift, R, Elixir, Clojure, and Scala.
 
 ## [0.2.6] - 2026-03-11 — Markdown + fonts.
@@ -42,8 +65,7 @@
 * Command instead of control on Mac OS
 * Ctrl + Shift + ? for Help dialog.
 * Window resize on folder open bugfix.
-
-## [0.2.2] - 2026-03-10 — Mac OS display bug fix.
+* Mac OS display bug fix.
 
 ## [0.2.1] - 2026-03-10 — Fixing Mac OS bundling bug.
 

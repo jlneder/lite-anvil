@@ -15,7 +15,7 @@ syntax.add {
     { pattern = { 'b?"', '"', '\\' },                type = "string"   },
     { pattern = "b?'\\?.'",                    type = "string"   },
     { pattern = "'[%a_][%w_]*",                      type = "keyword2" },
-    { pattern = "#!?%[.-%]",                         type = "keyword"  },
+    { pattern = "#!?%[[%a_][%w_]*",                  type = "keyword"  },
     { pattern = "[%a_][%w_]*!",                      type = "keyword"  },
     { pattern = "0x[%da-fA-F_]+",                    type = "number"   },
     { pattern = "0b[01_]+",                          type = "number"   },

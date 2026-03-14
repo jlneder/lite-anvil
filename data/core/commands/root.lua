@@ -1,6 +1,7 @@
 local core = require "core"
 local style = require "core.style"
 local DocView = require "core.docview"
+local EmptyView = require "core.emptyview"
 local command = require "core.command"
 local common = require "core.common"
 local config = require "core.config"
@@ -118,6 +119,36 @@ command.add(nil, {
       return true
     end
     return false
+  end,
+  ["root:reset-layout"] = function()
+    local prev_active = core.active_view
+    -- Collect all session views from non-locked leaf nodes before collapsing.
+    local views = {}
+    local function collect(node)
+      if node.type == "leaf" then
+        if not node.locked then
+          for _, view in ipairs(node.views) do
+            if not view:is(EmptyView) then
+              views[#views + 1] = view
+            end
+          end
+        end
+      else
+        collect(node.a)
+        collect(node.b)
+      end
+    end
+    collect(core.root_view.root_node)
+    -- Collapse all splits back to a single primary panel.
+    core.root_view:close_all_docviews()
+    -- Re-add all views as tabs in the primary node.
+    local primary = core.root_view:get_active_node_default()
+    for _, view in ipairs(views) do
+      primary:add_view(view)
+    end
+    if prev_active and prev_active.context == "session" then
+      core.set_active_view(prev_active)
+    end
   end
 })
 

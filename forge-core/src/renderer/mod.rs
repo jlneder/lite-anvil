@@ -25,6 +25,17 @@ fn with_cache<F: FnOnce(&mut RenCache)>(f: F) {
     });
 }
 
+/// Drop the renderer cache between Lua VM restarts.
+///
+/// This releases any `FontRef` arcs held by the previous frame's draw commands,
+/// allowing those `FontInner` objects (and their `FT_Face` raw pointers) to be
+/// freed before the new Lua VM creates its own fonts on the same `FT_Library`.
+pub fn reset_cache() {
+    CACHE.with(|c| {
+        *c.borrow_mut() = None;
+    });
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Build the `renderer` Lua table with a real SDL2 + FreeType2 backend.

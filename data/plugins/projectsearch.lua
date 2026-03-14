@@ -13,16 +13,60 @@ function ResultsView:__tostring() return "ResultsView" end
 
 ResultsView.context = "session"
 
-function ResultsView:new(path, text, fn)
+local function glob_to_pattern(glob)
+  if not glob or glob == "" then
+    return nil
+  end
+  local i = 1
+  local out = { "^" }
+  while i <= #glob do
+    local ch = glob:sub(i, i)
+    local next2 = glob:sub(i, i + 1)
+    if next2 == "**" then
+      out[#out + 1] = ".*"
+      i = i + 2
+    elseif ch == "*" then
+      out[#out + 1] = "[^/]*"
+      i = i + 1
+    elseif ch == "?" then
+      out[#out + 1] = "."
+      i = i + 1
+    else
+      out[#out + 1] = ch:gsub("([%%%+%-%^%$%(%)%.%[%]%?])", "%%%1")
+      i = i + 1
+    end
+  end
+  out[#out + 1] = "$"
+  return table.concat(out)
+end
+
+local function path_matches_glob(filename, path_glob)
+  if not path_glob or path_glob == "" then
+    return true
+  end
+  local pattern = glob_to_pattern(path_glob:gsub("\\", "/"))
+  for _, project in ipairs(core.projects) do
+    if common.path_belongs_to(filename, project.path) then
+      return common.relative_path(project.path, filename):gsub("\\", "/"):match(pattern) ~= nil
+    end
+  end
+  return filename:gsub("\\", "/"):match(pattern) ~= nil
+end
+
+function ResultsView:new(path, text, fn, path_glob)
   ResultsView.super.new(self)
   self.scrollable = true
   self.brightness = 0
   self.max_h_scroll = 0
-  self:begin_search(path, text, fn)
+  self.display_results = {}
+  self:begin_search(path, text, fn, path_glob)
 end
 
 
 function ResultsView:get_name()
+  if self.path_glob and self.path_glob ~= "" then
+    return "Search Results [" .. self.path_glob .. "]"
+  end
   return "Search Results"
 end
 
@@ -50,11 +94,31 @@ local function find_all_matches_in_file(t, filename, fn)
 end
 
 
-function ResultsView:begin_search(path, text, fn)
-  self.search_args = { path, text, fn }
+function ResultsView:rebuild_display_results()
+  self.display_results = {}
+  local last_file
+  for i, item in ipairs(self.results) do
+    if item.file ~= last_file then
+      self.display_results[#self.display_results + 1] = {
+        kind = "file",
+        file = item.file,
+      }
+      last_file = item.file
+    end
+    self.display_results[#self.display_results + 1] = {
+      kind = "match",
+      result_idx = i,
+    }
+  end
+end
+
+
+function ResultsView:begin_search(path, text, fn, path_glob)
+  self.search_args = { path, text, fn, path_glob }
   self.results = {}
   self.last_file_idx = 1
   self.query = text
+  self.path_glob = path_glob
   self.searching = true
   self.selected_idx = 0
 
@@ -62,8 +126,11 @@ function ResultsView:begin_search(path, text, fn)
     local i = 1
     for k, project in ipairs(core.projects) do
       for dir_name, file in project:files() do
-        if file.type == "file" and (not path or file.filename:find(path, 1, true) == 1) then
+        if file.type == "file"
+            and (not path or file.filename:find(path, 1, true) == 1)
+            and path_matches_glob(file.filename, path_glob) then
           find_all_matches_in_file(self.results, file.filename, fn)
+          self:rebuild_display_results()
         end
         self.last_file_idx = i
         i = i + 1
@@ -71,6 +138,7 @@ function ResultsView:begin_search(path, text, fn)
     end
     self.searching = false
     self.brightness = 100
+    self:rebuild_display_results()
     core.redraw = true
   end, self.results)
 
@@ -88,7 +156,9 @@ function ResultsView:on_mouse_moved(mx, my, ...)
   self.selected_idx = 0
   for i, item, x,y,w,h in self:each_visible_result() do
     if mx >= x and my >= y and mx < x + w and my < y + h then
-      self.selected_idx = i
+      if item.kind == "match" then
+        self.selected_idx = item.result_idx
+      end
       break
     end
   end
@@ -135,7 +205,7 @@ end
 
 
 function ResultsView:get_scrollable_size()
-  return self:get_results_yoffset() + #self.results * self:get_line_height()
+  return self:get_results_yoffset() + #self.display_results * self:get_line_height()
 end
 
 
@@ -160,7 +230,7 @@ function ResultsView:each_visible_result()
     local min, max = self:get_visible_results_range()
     y = y + self:get_results_yoffset() + lh * (min - 1)
     for i = min, max do
-      local item = self.results[i]
+      local item = self.display_results[i]
       if not item then break end
       local _, _, w = self:get_content_bounds()
       coroutine.yield(i, item, x, y, w, lh)
@@ -170,9 +240,26 @@ function ResultsView:each_visible_result()
 end
 
 
+function ResultsView:get_selected_display_index()
+  if self.selected_idx <= 0 then
+    return nil
+  end
+  for i, item in ipairs(self.display_results) do
+    if item.kind == "match" and item.result_idx == self.selected_idx then
+      return i
+    end
+  end
+  return nil
+end
+
+
 function ResultsView:scroll_to_make_selected_visible()
   local h = self:get_line_height()
-  local y = h * (self.selected_idx - 1)
+  local idx = self:get_selected_display_index()
+  if not idx then
+    return
+  end
+  local y = h * (idx - 1)
   self.scroll.to.y = math.min(self.scroll.to.y, y)
   self.scroll.to.y = math.max(self.scroll.to.y, y + h - self.size.y + self:get_results_yoffset())
 end
@@ -192,11 +279,13 @@ function ResultsView:draw()
   local x, y = ox + style.padding.x, oy + style.padding.y
   local text
   if self.searching then
-    text = string.format("Searching (%d files, %d matches) for %q...",
-      self.last_file_idx, #self.results, self.query)
+    text = string.format("Searching (%d files, %d matches) for %q%s...",
+      self.last_file_idx, #self.results, self.query,
+      self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "")
   else
-    text = string.format("Found %d matches for %q",
-      #self.results, self.query)
+    text = string.format("Found %d matches for %q%s",
+      #self.results, self.query,
+      self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "")
   end
   local color = common.lerp(style.text, style.accent, self.brightness / 100)
   renderer.draw_text(style.font, text, x, y, color)
@@ -216,15 +305,21 @@ function ResultsView:draw()
   core.push_clip_rect(ox, oy+yoffset + style.divider_size, bw, self.size.y-yoffset)
   local y1, y2 = self.position.y, self.position.y + self.size.y
   for i, item, x,y,w,h in self:each_visible_result() do
-    local color = style.text
-    if i == self.selected_idx then
-      color = style.accent
-      renderer.draw_rect(x, y, w, h, style.line_highlight)
-    end
     x = x + style.padding.x
-    local text = string.format("%s at line %d (col %d): ", core.root_project():normalize_path(item.file), item.line, item.col)
-    x = common.draw_text(style.font, style.dim, text, "left", x, y, w, h)
-    x = common.draw_text(style.code_font, color, item.text, "left", x, y, w, h)
+    if item.kind == "file" then
+      local label = core.root_project():normalize_path(item.file)
+      common.draw_text(style.font, style.accent, label, "left", x, y, w, h)
+    else
+      local match = self.results[item.result_idx]
+      local color = style.text
+      if item.result_idx == self.selected_idx then
+        color = style.accent
+        renderer.draw_rect(x - style.padding.x, y, w, h, style.line_highlight)
+      end
+      local text = string.format("  line %d (col %d): ", match.line, match.col)
+      x = common.draw_text(style.font, style.dim, text, "left", x, y, w, h)
+      x = common.draw_text(style.code_font, color, match.text, "left", x, y, w, h)
+    end
     self.max_h_scroll = math.max(self.max_h_scroll, x)
   end
   core.pop_clip_rect()
@@ -236,12 +331,12 @@ end
 ---@param text string
 ---@param fn fun(line_text:string):...
 ---@return plugins.projectsearch.resultsview?
-local function begin_search(path, text, fn)
+local function begin_search(path, text, fn, path_glob)
   if text == "" then
     core.error("Expected non-empty string")
     return
   end
-  local rv = ResultsView(path, text, fn)
+  local rv = ResultsView(path, text, fn, path_glob)
   core.root_view:get_active_node_default():add_view(rv)
   return rv
 end
@@ -273,7 +368,7 @@ function projectsearch.search_plain(text, path, insensitive)
     else
       return line_text:find(text, nil, true)
     end
-  end)
+  end, projectsearch.pending_path_glob)
 end
 
 ---@param text string
@@ -290,7 +385,7 @@ function projectsearch.search_regex(text, path, insensitive)
   if not re then core.log("%s", errmsg) return end
   return begin_search(path, text, function(line_text)
     return regex.cmatch(re, line_text)
-  end)
+  end, projectsearch.pending_path_glob)
 end
 
 ---@param text string
@@ -305,36 +400,57 @@ function projectsearch.search_fuzzy(text, path, insensitive)
     else
       return common.fuzzy_match(line_text, text) and 1
     end
-  end)
+  end, projectsearch.pending_path_glob)
+end
+
+
+local function prompt_path_glob(label, submit)
+  core.command_view:enter(label, {
+    submit = function(text)
+      submit(text ~= "" and text or nil)
+    end
+  })
+end
+
+
+local function enter_search(kind, path, submit, opts)
+  opts = opts or {}
+  core.command_view:enter(kind .. " In " .. (path or "Project"), {
+    text = opts.text,
+    select_text = opts.select_text,
+    submit = function(text)
+      prompt_path_glob("Path Glob Filter (optional)", function(path_glob)
+        projectsearch.pending_path_glob = path_glob
+        submit(text)
+        projectsearch.pending_path_glob = nil
+      end)
+    end
+  })
 end
 
 
 command.add(nil, {
   ["project-search:find"] = function(path)
-    core.command_view:enter("Find Text In " .. (path or "Project"), {
+    enter_search("Find Text", path, function(text)
+      projectsearch.search_plain(text, path, true)
+    end, {
       text = get_selected_text(),
       select_text = true,
-      submit = function(text)
-        projectsearch.search_plain(text, path, true)
-      end
     })
   end,
 
   ["project-search:find-regex"] = function(path)
-    core.command_view:enter("Find Regex In " .. (path or "Project"), {
-      submit = function(text)
-        projectsearch.search_regex(text, path, true)
-      end
-    })
+    enter_search("Find Regex", path, function(text)
+      projectsearch.search_regex(text, path, true)
+    end)
   end,
 
   ["project-search:fuzzy-find"] = function(path)
-    core.command_view:enter("Fuzzy Find Text In " .. (path or "Project"), {
+    enter_search("Fuzzy Find Text", path, function(text)
+      projectsearch.search_fuzzy(text, path, true)
+    end, {
       text = get_selected_text(),
       select_text = true,
-      submit = function(text)
-        projectsearch.search_fuzzy(text, path, true)
-      end
     })
   end,
 })

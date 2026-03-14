@@ -3,8 +3,10 @@ local core = require "core"
 local config = require "core.config"
 local Doc = require "core.doc"
 local Node = require "core.node"
+local RootView = require "core.rootview"
 local common = require "core.common"
 local dirwatch = require "core.dirwatch"
+local style = require "core.style"
 
 config.plugins.autoreload = common.merge({
   always_show_nagview = false,
@@ -25,7 +27,7 @@ local times = setmetatable({}, { __mode = "k" })
 local visible = setmetatable({}, { __mode = "k" })
 
 local function update_time(doc)
-  local info = system.get_file_info(doc.filename)
+  local info = system.get_file_info(doc.abs_filename or doc.filename or "")
   times[doc] = info and info.modified
 end
 
@@ -64,15 +66,58 @@ local function delayed_reload(doc, mtime)
   end)
 end
 
+local function keep_current_doc(doc)
+  times[doc] = doc.deferred_reload_mtime or times[doc]
+  doc.deferred_reload = false
+  doc.deferred_reload_mtime = nil
+  doc.reload_prompt_queued = false
+end
+
 local function check_prompt_reload(doc)
-  if doc and doc.deferred_reload then
-    core.nag_view:show("File Changed", doc.filename .. " has changed. Reload this file?", {
-      { font = style.font, text = "Yes", default_yes = true },
-      { font = style.font, text = "No" , default_no = true }
-    }, function(item)
-      if item.text == "Yes" then reload_doc(doc) end
-      doc.deferred_reload = false
-    end)
+  if doc and doc.deferred_reload and not doc.reload_prompt_queued then
+    doc.reload_prompt_queued = true
+    core.nag_view:show(
+      "File Changed",
+      string.format(
+        "%s has changed on disk.\nReload from the filesystem and overwrite your current unsaved changes, or keep the current version?",
+        doc.filename
+      ),
+      {
+        { font = style.font, text = "Keep Current", default_yes = true },
+        { font = style.font, text = "Reload from Disk", default_no = true }
+      },
+      function(item)
+        if item.text == "Reload from Disk" then
+          doc.reload_prompt_queued = false
+          reload_doc(doc)
+        else
+          keep_current_doc(doc)
+        end
+      end
+    )
+  end
+end
+
+local function flag_doc_changed(doc, mtime, prompt_now)
+  doc.deferred_reload = true
+  doc.deferred_reload_mtime = mtime
+  if prompt_now then
+    check_prompt_reload(doc)
+  end
+end
+
+local function check_open_docs(prompt_dirty_docs)
+  for _, doc in ipairs(core.docs) do
+    if doc.abs_filename and not doc.new_file then
+      local info = system.get_file_info(doc.abs_filename)
+      if info and times[doc] ~= info.modified then
+        if not doc:is_dirty() and not config.plugins.autoreload.always_show_nagview then
+          reload_doc(doc)
+        else
+          flag_doc_changed(doc, info.modified, prompt_dirty_docs)
+        end
+      end
+    end
   end
 end
 
@@ -97,18 +142,23 @@ function Node:set_active_view(view)
   doc_changes_visiblity(self.active_view.doc, true)
 end
 
+local rootview_on_focus_gained = RootView.on_focus_gained
+function RootView:on_focus_gained(...)
+  rootview_on_focus_gained(self, ...)
+  check_open_docs(true)
+end
+
 core.add_thread(function()
   while true do
     watch:check(function(file)
       for i, doc in ipairs(core.docs) do
         if doc.abs_filename == file then
-          local info = system.get_file_info(doc.filename or "")
+          local info = system.get_file_info(doc.abs_filename or "")
           if info and times[doc] ~= info.modified then
             if not doc:is_dirty() and not config.plugins.autoreload.always_show_nagview then
               reload_doc(doc)
             else
-              doc.deferred_reload = true
-              if doc == core.active_view.doc then check_prompt_reload(doc) end
+              flag_doc_changed(doc, info.modified, doc == core.active_view.doc)
             end
           end
         end

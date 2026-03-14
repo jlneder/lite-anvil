@@ -3,7 +3,7 @@ local syntax = require "core.syntax"
 
 syntax.add {
   name = "TypeScript",
-  files = { "%.ts$", "%.tsx$", "%.d%.ts$" },
+  files = { "%.ts$", "%.d%.ts$" },
   comment = "//",
   block_comment = { "/*", "*/" },
   patterns = {

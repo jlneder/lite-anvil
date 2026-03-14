@@ -1,10 +1,10 @@
 local function keymap_macos(keymap)
   keymap.add_direct {
-    ["cmd+shift+p"] = "core:find-command",
+    ["cmd+p"] = "core:find-command",
     ["cmd+o"] = "core:open-file",
     ["cmd+n"] = "core:new-doc",
     ["cmd+shift+c"] = "core:change-project-folder",
-    ["cmd+shift+o"] = "core:open-project-folder",
+    ["cmd+option+o"] = "core:open-project-folder",
     ["cmd+option+r"] = "core:restart",
     ["cmd+ctrl+return"] = "core:toggle-fullscreen",
 

@@ -33,6 +33,15 @@ function Highlighter:start()
         if not (line and line.init_state == state and line.text == self.doc.lines[i] and not line.resume) then
           retokenized_from = retokenized_from or i
           self.lines[i] = self:tokenize_line(i, state, line and line.resume)
+          if line and line.semantic_tokens then
+            self.lines[i].semantic_tokens = clone_positioned(line.semantic_tokens)
+            self.lines[i].positioned = overlay_positioned(
+              self.lines[i].base_positioned,
+              self.lines[i].semantic_tokens
+            )
+            self.lines[i].tokens = positioned_to_pair_tokens(self.lines[i].positioned, self.lines[i].text)
+            self.lines[i].signature = calc_signature(self.lines[i].positioned)
+          end
           if self.lines[i].resume then
             self.first_invalid_line = i
             goto yield
@@ -100,13 +109,164 @@ function Highlighter:update_notify(line, n)
   -- plugins can hook here to be notified that lines have been retokenized
 end
 
+local function calc_signature(positioned_tokens)
+  if not positioned_tokens or #positioned_tokens == 0 then
+    return 0
+  end
+
+  local hash = 5381
+  for i = 1, #positioned_tokens do
+    local token = positioned_tokens[i]
+    local part = string.format("%s:%d:%d|", token.type, token.pos, token.len)
+    for j = 1, #part do
+      hash = ((hash * 33) + part:byte(j)) % 2147483647
+    end
+  end
+  return hash
+end
+
+local function pair_tokens_to_positioned(tokens)
+  local positioned = {}
+  local pos = 0
+  for i = 1, #tokens, 2 do
+    local token_type = tokens[i]
+    local text = tokens[i + 1] or ""
+    local len = text:ulen() or #text
+    positioned[#positioned + 1] = {
+      type = token_type,
+      pos = pos,
+      len = len,
+    }
+    pos = pos + len
+  end
+  return positioned
+end
+
+local function positioned_to_pair_tokens(positioned, full_text)
+  local pair_tokens = {}
+  for i = 1, #positioned do
+    local token = positioned[i]
+    local start_char = token.pos + 1
+    local end_char = token.pos + token.len
+    local text = full_text:usub(start_char, end_char)
+    if text and #text > 0 then
+      pair_tokens[#pair_tokens + 1] = token.type
+      pair_tokens[#pair_tokens + 1] = text
+    end
+  end
+  return pair_tokens
+end
+
+local function clone_positioned(positioned)
+  local copy = {}
+  for i = 1, #positioned do
+    local token = positioned[i]
+    copy[i] = {
+      type = token.type,
+      pos = token.pos,
+      len = token.len,
+    }
+  end
+  return copy
+end
+
+local function merge_adjacent(positioned)
+  local merged = {}
+  for i = 1, #positioned do
+    local token = positioned[i]
+    if token.len > 0 then
+      local prev = merged[#merged]
+      if prev and prev.type == token.type and prev.pos + prev.len == token.pos then
+        prev.len = prev.len + token.len
+      else
+        merged[#merged + 1] = {
+          type = token.type,
+          pos = token.pos,
+          len = token.len,
+        }
+      end
+    end
+  end
+  return merged
+end
+
+local function overlay_positioned(base_tokens, overlay_tokens)
+  if not overlay_tokens or #overlay_tokens == 0 then
+    return clone_positioned(base_tokens)
+  end
+
+  local result = {}
+  local overlay_idx = 1
+
+  for i = 1, #base_tokens do
+    local base = base_tokens[i]
+    local cursor = base.pos
+    local base_end = base.pos + base.len
+
+    while overlay_idx <= #overlay_tokens and overlay_tokens[overlay_idx].pos + overlay_tokens[overlay_idx].len <= cursor do
+      overlay_idx = overlay_idx + 1
+    end
+
+    local scan_idx = overlay_idx
+    while cursor < base_end do
+      local overlay = overlay_tokens[scan_idx]
+      if not overlay or overlay.pos >= base_end then
+        result[#result + 1] = {
+          type = base.type,
+          pos = cursor,
+          len = base_end - cursor,
+        }
+        cursor = base_end
+      elseif overlay.pos > cursor then
+        result[#result + 1] = {
+          type = base.type,
+          pos = cursor,
+          len = overlay.pos - cursor,
+        }
+        cursor = overlay.pos
+      else
+        local overlay_end = math.min(base_end, overlay.pos + overlay.len)
+        if overlay_end > cursor then
+          result[#result + 1] = {
+            type = overlay.type,
+            pos = cursor,
+            len = overlay_end - cursor,
+          }
+          cursor = overlay_end
+        else
+          scan_idx = scan_idx + 1
+        end
+      end
+    end
+  end
+
+  return merge_adjacent(result)
+end
+
 
 function Highlighter:tokenize_line(idx, state, resume)
   local res = {}
   res.init_state = state
   res.text = self.doc.lines[idx]
   res.tokens, res.state, res.resume = tokenizer.tokenize(self.doc.syntax, res.text, state, resume)
+  res.base_positioned = pair_tokens_to_positioned(res.tokens)
+  res.positioned = clone_positioned(res.base_positioned)
+  res.signature = calc_signature(res.positioned)
   return res
+end
+
+function Highlighter:merge_line(idx, overlay_tokens)
+  local line = self:get_line(idx)
+  line.semantic_tokens = overlay_tokens and clone_positioned(overlay_tokens) or nil
+  line.positioned = overlay_positioned(line.base_positioned, line.semantic_tokens)
+  line.tokens = positioned_to_pair_tokens(line.positioned, line.text)
+  line.signature = calc_signature(line.positioned)
+  self:update_notify(idx, 0)
+end
+
+function Highlighter:get_line_signature(idx)
+  local line = self.lines[idx]
+  return line and line.signature or 0
 end
 
 
@@ -114,7 +274,14 @@ function Highlighter:get_line(idx)
   local line = self.lines[idx]
   if not line or line.text ~= self.doc.lines[idx] then
     local prev = self.lines[idx - 1]
+    local old_line = line
     line = self:tokenize_line(idx, prev and prev.state)
+    if old_line and old_line.semantic_tokens then
+      line.semantic_tokens = clone_positioned(old_line.semantic_tokens)
+      line.positioned = overlay_positioned(line.base_positioned, line.semantic_tokens)
+      line.tokens = positioned_to_pair_tokens(line.positioned, line.text)
+      line.signature = calc_signature(line.positioned)
+    end
     self.lines[idx] = line
     self:update_notify(idx, 0)
   end

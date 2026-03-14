@@ -2,6 +2,8 @@ mod dirmonitor;
 mod markdown;
 #[cfg(unix)]
 mod process;
+#[cfg(unix)]
+mod terminal;
 mod regex;
 mod utf8extra;
 
@@ -174,6 +176,9 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
 
     let process = make_process(lua)?;
     insert(&globals, &pkg_loaded, "process", process)?;
+
+    let terminal = make_terminal(lua)?;
+    insert(&globals, &pkg_loaded, "terminal", terminal)?;
 
     let utf8extra = utf8extra::make_module(lua)?;
     insert(&globals, &pkg_loaded, "utf8extra", utf8extra)?;
@@ -1031,6 +1036,25 @@ fn make_process(lua: &Lua) -> LuaResult<LuaTable> {
         lua.create_function(|_, _: LuaMultiValue| -> LuaResult<LuaValue> {
             Err(LuaError::RuntimeError(
                 "process.start is not supported on this platform".into(),
+            ))
+        })?,
+    )?;
+    Ok(t)
+}
+
+#[cfg(unix)]
+fn make_terminal(lua: &Lua) -> LuaResult<LuaTable> {
+    terminal::make_module(lua)
+}
+
+#[cfg(not(unix))]
+fn make_terminal(lua: &Lua) -> LuaResult<LuaTable> {
+    let t = lua.create_table()?;
+    t.set(
+        "spawn",
+        lua.create_function(|_, _: LuaMultiValue| -> LuaResult<LuaValue> {
+            Err(LuaError::RuntimeError(
+                "terminal.spawn is not supported on this platform".into(),
             ))
         })?,
     )?;

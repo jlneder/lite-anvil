@@ -3,8 +3,13 @@ local core    = require "core"
 local common  = require "core.common"
 local keymap  = require "core.keymap"
 local command = require "core.command"
+local config  = require "core.config"
 local style   = require "core.style"
 local View    = require "core.view"
+
+config.plugins.projectreplace = common.merge({
+  backup_originals = true,
+}, config.plugins.projectreplace)
 
 local ReplaceView = View:extend()
 
@@ -12,13 +17,14 @@ function ReplaceView:__tostring() return "ReplaceView" end
 
 ReplaceView.context = "session"
 
-function ReplaceView:new(path, search, replace, fn_find, fn_apply)
+function ReplaceView:new(path, search, replace, fn_find, fn_apply, path_glob)
   ReplaceView.super.new(self)
   self.scrollable    = true
   self.max_h_scroll  = 0
   self.path          = path
   self.search        = search
   self.replace       = replace
+  self.path_glob     = path_glob
   self.fn_find       = fn_find
   self.fn_apply      = fn_apply
   self.results       = {}
@@ -54,6 +60,49 @@ local function collect_matches(results, filename, fn_find)
   fp:close()
 end
 
+local function glob_to_pattern(glob)
+  if not glob or glob == "" then
+    return nil
+  end
+  local i = 1
+  local out = { "^" }
+  while i <= #glob do
+    local ch = glob:sub(i, i)
+    local next2 = glob:sub(i, i + 1)
+    if next2 == "**" then
+      out[#out + 1] = ".*"
+      i = i + 2
+    elseif ch == "*" then
+      out[#out + 1] = "[^/]*"
+      i = i + 1
+    elseif ch == "?" then
+      out[#out + 1] = "."
+      i = i + 1
+    else
+      out[#out + 1] = ch:gsub("([%%%+%-%^%$%(%)%.%[%]%?])", "%%%1")
+      i = i + 1
+    end
+  end
+  out[#out + 1] = "$"
+  return table.concat(out)
+end
+
+local function path_matches_glob(filename, path_glob)
+  if not path_glob or path_glob == "" then
+    return true
+  end
+  local pattern = glob_to_pattern(path_glob:gsub("\\", "/"))
+  if not pattern then
+    return true
+  end
+  for _, project in ipairs(core.projects) do
+    if common.path_belongs_to(filename, project.path) then
+      return common.relative_path(project.path, filename):gsub("\\", "/"):match(pattern) ~= nil
+    end
+  end
+  return filename:gsub("\\", "/"):match(pattern) ~= nil
+end
+
 function ReplaceView:begin_scan()
   self.results       = {}
   self.phase         = "scanning"
@@ -63,7 +112,9 @@ function ReplaceView:begin_scan()
     local i = 1
     for _, project in ipairs(core.projects) do
       for _, file in project:files() do
-        if file.type == "file" and (not self.path or file.filename:find(self.path, 1, true) == 1) then
+        if file.type == "file"
+            and (not self.path or file.filename:find(self.path, 1, true) == 1)
+            and path_matches_glob(file.filename, self.path_glob) then
           collect_matches(self.results, file.filename, self.fn_find)
         end
         self.last_file_idx = i
@@ -101,6 +152,13 @@ function ReplaceView:apply_replace()
         fp:close()
         local new_content, count = self.fn_apply(content)
         if count > 0 then
+          if config.plugins.projectreplace.backup_originals then
+            local backup = io.open(filename .. ".bak", "wb")
+            if backup then
+              backup:write(content)
+              backup:close()
+            end
+          end
           local out = io.open(filename, "wb")
           if out then
             out:write(new_content)
@@ -216,11 +274,14 @@ function ReplaceView:draw()
 
   local msg
   if self.phase == "scanning" then
-    msg = string.format("Searching (%d files, %d matches) for %q...",
-      self.last_file_idx, #self.results, self.search)
+    msg = string.format("Searching (%d files, %d matches) for %q%s...",
+      self.last_file_idx, #self.results, self.search,
+      self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "")
   elseif self.phase == "confirming" then
-    msg = string.format("Found %d matches for %q — press F5 to replace all with %q",
-      #self.results, self.search, self.replace)
+    msg = string.format("Found %d matches for %q%s — press F5 to replace all with %q",
+      #self.results, self.search,
+      self.path_glob and self.path_glob ~= "" and (" in " .. self.path_glob) or "",
+      self.replace)
   elseif self.phase == "replacing" then
     msg = string.format("Replacing... (%d files written)", self.replaced_files)
   else
@@ -303,14 +364,22 @@ local function get_selected_text()
   end
 end
 
-local function open_replace_view(path, search, replace, fn_find, fn_apply)
+local function open_replace_view(path, search, replace, fn_find, fn_apply, path_glob)
   if search == "" then
     core.error("Expected non-empty search string")
     return
   end
-  local rv = ReplaceView(path, search, replace, fn_find, fn_apply)
+  local rv = ReplaceView(path, search, replace, fn_find, fn_apply, path_glob)
   core.root_view:get_active_node_default():add_view(rv)
   return rv
+end
+
+local function prompt_path_glob(submit)
+  core.command_view:enter("Path Glob Filter (optional)", {
+    submit = function(text)
+      submit(text ~= "" and text or nil)
+    end
+  })
 end
 
 
@@ -320,18 +389,21 @@ command.add(nil, {
       text = get_selected_text(),
       select_text = true,
       submit = function(search)
-        core.command_view:enter("Replace With", {
-          submit = function(replace)
-            open_replace_view(path, search, replace,
-              function(line_text)
-                return line_text:find(search, nil, true)
-              end,
-              function(content)
-                return plain_replace(content, search, replace)
-              end
-            )
-          end
-        })
+        prompt_path_glob(function(path_glob)
+          core.command_view:enter("Replace With", {
+            submit = function(replace)
+              open_replace_view(path, search, replace,
+                function(line_text)
+                  return line_text:find(search, nil, true)
+                end,
+                function(content)
+                  return plain_replace(content, search, replace)
+                end,
+                path_glob
+              )
+            end
+          })
+        end)
       end
     })
   end,
@@ -341,18 +413,21 @@ command.add(nil, {
       submit = function(search)
         local re, errmsg = regex.compile(search)
         if not re then core.log("%s", errmsg) return end
-        core.command_view:enter("Replace With", {
-          submit = function(replace)
-            open_replace_view(path, search, replace,
-              function(line_text)
-                return regex.cmatch(re, line_text)
-              end,
-              function(content)
-                return regex_replace(content, re, replace)
-              end
-            )
-          end
-        })
+        prompt_path_glob(function(path_glob)
+          core.command_view:enter("Replace With", {
+            submit = function(replace)
+              open_replace_view(path, search, replace,
+                function(line_text)
+                  return regex.cmatch(re, line_text)
+                end,
+                function(content)
+                  return regex_replace(content, re, replace)
+                end,
+                path_glob
+              )
+            end
+          })
+        end)
       end
     })
   end,

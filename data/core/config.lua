@@ -178,6 +178,23 @@ config.line_limit = 80
 ---@type string
 config.theme = "default"
 
+---Git ignore integration settings shared by project search and tree/file views.
+config.gitignore = {
+  enabled = true,
+  additional_patterns = {},
+}
+
+---LSP startup and project integration settings.
+config.lsp = {
+  ---Whether to load the LSP plugin during startup.
+  ---Set this to `false` to skip LSP initialization unless you load it manually.
+  load_on_startup = true,
+  ---Whether to request and apply LSP semantic highlighting overlays.
+  semantic_highlighting = true,
+  ---Whether to render diagnostics inline in the editor gutter/body.
+  inline_diagnostics = true,
+}
+
 ---UI metrics and spacing settings.
 ---Values are specified before applying `SCALE`.
 config.ui = {

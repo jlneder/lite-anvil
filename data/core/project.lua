@@ -5,6 +5,7 @@ local Project = Object:extend()
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
+local gitignore = require "core.gitignore"
 
 -- inspect config.ignore_files patterns and prepare ready to use entries.
 local function compile_ignore_files()
@@ -31,6 +32,7 @@ function Project:new(path)
   self.path = path
   self.name = common.basename(path)
   self.compiled = compile_ignore_files()
+  self.git_root = gitignore.find_root(path) or path
   return self
 end
 
@@ -91,7 +93,12 @@ function Project:is_ignored(info, path)
   -- a directory, for example for /dev/* entries on linux.
   if info and info.type then
     if path then info.filename = path end
-    return not fileinfo_pass_filter(info, self.compiled)
+    if not fileinfo_pass_filter(info, self.compiled) then
+      return true
+    end
+    if config.gitignore.enabled ~= false and path then
+      return gitignore.match(self.git_root or self.path, path, info)
+    end
   end
   return false
 end

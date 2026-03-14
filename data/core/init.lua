@@ -36,11 +36,34 @@ end
 local function save_session()
   local fp = io.open(USERDIR .. PATHSEP .. "session.lua", "w")
   if fp then
+    local treeview_size = nil
+    if config.plugins and config.plugins.treeview
+       and type(config.plugins.treeview.size) == "number" then
+      treeview_size = config.plugins.treeview.size
+    end
+    local open_files = {}
+    local seen_files = {}
+    for _, doc in ipairs(core.docs) do
+      if doc.abs_filename and not seen_files[doc.abs_filename] then
+        seen_files[doc.abs_filename] = true
+        open_files[#open_files + 1] = doc.abs_filename
+      end
+    end
+    local plugin_data = {}
+    for name, hook in pairs(core.session_save_hooks or {}) do
+      local ok, result = pcall(hook)
+      if ok and result ~= nil then
+        plugin_data[name] = result
+      end
+    end
     fp:write("return {recents=", common.serialize(core.recent_projects),
       ", window=", common.serialize(table.pack(system.get_window_size(core.window))),
       ", window_mode=", common.serialize(system.get_window_mode(core.window)),
       ", previous_find=", common.serialize(core.previous_find),
       ", previous_replace=", common.serialize(core.previous_replace),
+      ", treeview_size=", common.serialize(treeview_size),
+      ", open_files=", common.serialize(open_files),
+      ", plugin_data=", common.serialize(plugin_data),
       "}\n")
     fp:close()
   end
@@ -236,6 +259,34 @@ local style = require "core.style"
 
 -- disable plugin detectindent, otherwise it is enabled by default:
 -- config.plugins.detectindent = false
+--
+-- disable LSP startup while keeping the plugin installed:
+-- config.lsp.load_on_startup = false
+-- disable semantic token overlays while keeping LSP features:
+-- config.lsp.semantic_highlighting = false
+-- disable inline diagnostics while keeping LSP features:
+-- config.lsp.inline_diagnostics = false
+-- or disable the plugin entirely:
+-- config.plugins.lsp = false
+--
+-- terminal plugin examples:
+-- config.plugins.terminal.shell = os.getenv("SHELL") or "bash"
+-- config.plugins.terminal.shell_args = {}
+-- config.plugins.terminal.scrollback = 10000
+-- config.plugins.terminal.color_scheme = "Dracula"
+-- config.plugins.terminal.close_on_exit = false
+--
+-- gitignore integration examples:
+-- config.gitignore.enabled = true
+-- config.gitignore.additional_patterns = { "%.log$", "^dist/" }
+--
+-- git plugin examples:
+-- config.plugins.git.refresh_interval = 5
+-- config.plugins.git.show_branch_in_statusbar = true
+-- config.plugins.git.treeview_highlighting = true
+--
+-- project replace examples:
+-- config.plugins.projectreplace.backup_originals = true
 
 -------------------------- Editor Settings ------------------------------------
 
@@ -351,6 +402,7 @@ function core.init()
   end
 
   local session = load_session()
+  core.session = session
   core.recent_projects = session.recents or {}
   core.previous_find = {}
   core.previous_replace = {}
@@ -436,6 +488,9 @@ function core.init()
     local status, err = pcall(core.set_project, project_dir_abs)
   end
 
+  core.session_save_hooks = {}
+  core.session_load_hooks = {}
+
   -- Load core and user plugins giving preference to user ones with same name.
   local plugins_success, plugins_refuse_list = core.load_plugins()
 
@@ -455,6 +510,33 @@ function core.init()
 
   for _, filename in ipairs(files) do
     core.root_view:open_doc(core.open_doc(filename))
+  end
+
+  -- When no command-line files are given, restore the previous session.
+  if #files == 0 then
+    core.add_thread(function()
+      local primary = core.root_view:get_primary_node()
+      if session.open_files then
+        for _, path in ipairs(session.open_files) do
+          local ok, doc = pcall(core.open_doc, path)
+          if ok and doc then
+            local already_open = false
+            for _, v in ipairs(primary.views) do
+              if v.doc == doc then already_open = true; break end
+            end
+            if not already_open then
+              local view = DocView(doc)
+              primary:add_view(view)
+              core.root_view.root_node:update_layout()
+              view:scroll_to_line(view.doc:get_selection(), true, true)
+            end
+          end
+        end
+      end
+      for name, hook in pairs(core.session_load_hooks) do
+        pcall(hook, session.plugin_data and session.plugin_data[name], primary)
+      end
+    end)
   end
 
   if not plugins_success then
@@ -820,6 +902,8 @@ function core.load_plugins()
       local rlist = plugin.file:find(USERDIR, 1, true) == 1
         and 'userdir' or 'datadir'
       table.insert(refused_list[rlist].plugins, plugin)
+    elseif plugin.name == "lsp" and config.lsp and config.lsp.load_on_startup == false then
+      core.log_quiet("Skipped plugin %q due to config.lsp.load_on_startup = false", plugin.name)
     elseif config.plugins[plugin.name] ~= false then
       if plugin.name:match("^language_") then
         require("core.syntax").register_lazy_plugin(plugin)
@@ -1116,6 +1200,8 @@ function core.on_event(type, ...)
   elseif type == "focuslost" then
     keymap.modkeys = {}
     core.root_view:on_focus_lost(...)
+  elseif type == "focusgained" then
+    core.root_view:on_focus_gained(...)
   elseif type == "quit" then
     core.quit()
   end

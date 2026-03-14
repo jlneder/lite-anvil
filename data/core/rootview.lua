@@ -517,6 +517,9 @@ function RootView:on_focus_lost(...)
   core.redraw = true
 end
 
+function RootView:on_focus_gained(...)
+end
+
 
 function RootView:interpolate_drag_overlay(overlay)
   self:move_towards(overlay, "x", overlay.to.x, nil, "tab_drag")

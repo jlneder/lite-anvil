@@ -56,7 +56,8 @@ function TreeView:new()
   self.scrollable = true
   self.visible = config.plugins.treeview.visible
   self.init_size = true
-  self.target_size = config.plugins.treeview.size
+  local saved_size = core.session and core.session.treeview_size
+  self.target_size = type(saved_size) == "number" and saved_size or config.plugins.treeview.size
   self.show_hidden = config.plugins.treeview.show_hidden
   self.show_ignored = config.plugins.treeview.show_ignored
   self.cache = {}
@@ -73,6 +74,10 @@ end
 function TreeView:set_target_size(axis, value)
   if axis == "x" then
     self.target_size = value
+    config.plugins.treeview.size = value
+    if core.session then
+      core.session.treeview_size = value
+    end
     return true
   end
 end
