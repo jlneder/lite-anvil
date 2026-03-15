@@ -692,7 +692,11 @@ fn apply_record_to_state(state: &mut BufferState, packed: &[u8], push_redo: bool
     let current_selection = state.selections.clone();
     let mut inverse = Vec::new();
     for edit in &edits {
-        inverse.push(apply_single_edit(&mut state.lines, &mut state.selections, edit));
+        inverse.push(apply_single_edit(
+            &mut state.lines,
+            &mut state.selections,
+            edit,
+        ));
     }
     inverse.reverse();
     let mut restored = selection_restore;
@@ -743,7 +747,14 @@ fn apply_remove_to_buffer(
     let selection_restore = state.selections.clone();
     let before_len = state.lines.len() as isize;
     let removed = get_text(&state.lines, line1, col1, line2, col2, false);
-    apply_remove_internal(&mut state.lines, &mut state.selections, line1, col1, line2, col2);
+    apply_remove_internal(
+        &mut state.lines,
+        &mut state.selections,
+        line1,
+        col1,
+        line2,
+        col2,
+    );
     sanitize_selections(&state.lines, &mut state.selections);
     state.undo.push(pack_record(
         &selection_restore,
@@ -775,7 +786,14 @@ fn apply_edits_to_buffer(state: &mut BufferState, edits: LuaTable) -> LuaResult<
         let text = edit.get::<Option<String>>("text")?.unwrap_or_default();
         if line1 != line2 || col1 != col2 {
             let removed = get_text(&state.lines, line1, col1, line2, col2, false);
-            apply_remove_internal(&mut state.lines, &mut state.selections, line1, col1, line2, col2);
+            apply_remove_internal(
+                &mut state.lines,
+                &mut state.selections,
+                line1,
+                col1,
+                line2,
+                col2,
+            );
             inverse.push(EditRecord {
                 kind: b'i',
                 line1,
@@ -787,7 +805,8 @@ fn apply_edits_to_buffer(state: &mut BufferState, edits: LuaTable) -> LuaResult<
         }
         if !text.is_empty() {
             apply_insert_internal(&mut state.lines, &mut state.selections, line1, col1, &text);
-            let (end_line, end_col) = position_offset(&state.lines, line1, col1, text.len() as isize);
+            let (end_line, end_col) =
+                position_offset(&state.lines, line1, col1, text.len() as isize);
             inverse.push(EditRecord {
                 kind: b'r',
                 line1,
@@ -1036,17 +1055,36 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "buffer_position_offset",
-        lua.create_function(|_, (buffer_id, line, col, offset): (u64, usize, usize, isize)| {
-            with_buffer_mut(buffer_id, |state| Ok(position_offset(&state.lines, line, col, offset)))
-        })?,
+        lua.create_function(
+            |_, (buffer_id, line, col, offset): (u64, usize, usize, isize)| {
+                with_buffer_mut(buffer_id, |state| {
+                    Ok(position_offset(&state.lines, line, col, offset))
+                })
+            },
+        )?,
     )?;
 
     module.set(
         "buffer_get_text",
         lua.create_function(
-            |_, (buffer_id, line1, col1, line2, col2, inclusive): (u64, usize, usize, usize, usize, Option<bool>)| {
+            |_,
+             (buffer_id, line1, col1, line2, col2, inclusive): (
+                u64,
+                usize,
+                usize,
+                usize,
+                usize,
+                Option<bool>,
+            )| {
                 with_buffer_mut(buffer_id, |state| {
-                    Ok(get_text(&state.lines, line1, col1, line2, col2, inclusive.unwrap_or(false)))
+                    Ok(get_text(
+                        &state.lines,
+                        line1,
+                        col1,
+                        line2,
+                        col2,
+                        inclusive.unwrap_or(false),
+                    ))
                 })
             },
         )?,
@@ -1072,20 +1110,24 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
     module.set(
         "buffer_save",
         lua.create_function(|_, (buffer_id, filename, crlf): (u64, String, bool)| {
-            with_buffer_mut(buffer_id, |state| save_state_to_file(state, &filename, crlf).map(|_| true))
+            with_buffer_mut(buffer_id, |state| {
+                save_state_to_file(state, &filename, crlf).map(|_| true)
+            })
         })?,
     )?;
 
     module.set(
         "buffer_apply_insert",
-        lua.create_function(|lua, (buffer_id, line, col, text): (u64, usize, usize, String)| {
-            with_buffer_mut(buffer_id, |state| {
-                let line_delta = apply_insert_to_buffer(state, line, col, &text);
-                let out = buffer_snapshot(lua, state)?;
-                out.set("line_delta", line_delta)?;
-                Ok(out)
-            })
-        })?,
+        lua.create_function(
+            |lua, (buffer_id, line, col, text): (u64, usize, usize, String)| {
+                with_buffer_mut(buffer_id, |state| {
+                    let line_delta = apply_insert_to_buffer(state, line, col, &text);
+                    let out = buffer_snapshot(lua, state)?;
+                    out.set("line_delta", line_delta)?;
+                    Ok(out)
+                })
+            },
+        )?,
     )?;
 
     module.set(

@@ -17,7 +17,8 @@ struct ManifestEntry {
     _watcher: RecommendedWatcher,
 }
 
-static MANIFESTS: Lazy<Mutex<HashMap<String, ManifestEntry>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static MANIFESTS: Lazy<Mutex<HashMap<String, ManifestEntry>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn normalize_root(root: &str) -> String {
     root.replace('\\', "/")

@@ -20,7 +20,8 @@ struct TransportHandle {
     exit_code: Arc<AtomicU64>,
 }
 
-static TRANSPORTS: Lazy<Mutex<HashMap<u64, TransportHandle>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static TRANSPORTS: Lazy<Mutex<HashMap<u64, TransportHandle>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 static NEXT_ID: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(1));
 
 fn next_id() -> u64 {
@@ -109,23 +110,22 @@ fn parse_messages(buffer: &mut Vec<u8>, sender: &Sender<Value>) {
             break;
         };
         let header = String::from_utf8_lossy(&buffer[..header_end]);
-        let Some(length) = header
-            .lines()
-            .find_map(|line| line.split_once(':').and_then(|(k, v)| {
+        let Some(length) = header.lines().find_map(|line| {
+            line.split_once(':').and_then(|(k, v)| {
                 if k.eq_ignore_ascii_case("Content-Length") {
                     v.trim().parse::<usize>().ok()
                 } else {
                     None
                 }
-            }))
-        else {
+            })
+        }) else {
             buffer.clear();
             break;
         };
         let body_start = header_end + 4;
         let body_end = body_start + length;
         if buffer.len() < body_end {
-          break;
+            break;
         }
         if let Ok(value) = serde_json::from_slice::<Value>(&buffer[body_start..body_end]) {
             let _ = sender.send(value);
@@ -184,67 +184,70 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "spawn",
-        lua.create_function(|_, (command, cwd, env): (LuaValue, String, Option<LuaTable>)| {
-            let command = command_from_lua(command)?;
-            let mut cmd = Command::new(
-                command
-                    .first()
-                    .ok_or_else(|| LuaError::RuntimeError("empty LSP command".to_string()))?,
-            );
-            for arg in command.iter().skip(1) {
-                cmd.arg(arg);
-            }
-            cmd.current_dir(cwd)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            if let Some(env) = env {
-                for pair in env.pairs::<String, String>() {
-                    let (key, value) = pair?;
-                    cmd.env(key, value);
+        lua.create_function(
+            |_, (command, cwd, env): (LuaValue, String, Option<LuaTable>)| {
+                let command = command_from_lua(command)?;
+                let mut cmd = Command::new(
+                    command
+                        .first()
+                        .ok_or_else(|| LuaError::RuntimeError("empty LSP command".to_string()))?,
+                );
+                for arg in command.iter().skip(1) {
+                    cmd.arg(arg);
                 }
-            }
-            let mut child = cmd
-                .spawn()
-                .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
-            let stdin = child
-                .stdin
-                .take()
-                .ok_or_else(|| LuaError::RuntimeError("missing LSP stdin".to_string()))?;
-            let stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| LuaError::RuntimeError("missing LSP stdout".to_string()))?;
-            let stderr = child
-                .stderr
-                .take()
-                .ok_or_else(|| LuaError::RuntimeError("missing LSP stderr".to_string()))?;
+                cmd.current_dir(cwd)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                if let Some(env) = env {
+                    for pair in env.pairs::<String, String>() {
+                        let (key, value) = pair?;
+                        cmd.env(key, value);
+                    }
+                }
+                let mut child = cmd
+                    .spawn()
+                    .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+                let stdin = child
+                    .stdin
+                    .take()
+                    .ok_or_else(|| LuaError::RuntimeError("missing LSP stdin".to_string()))?;
+                let stdout = child
+                    .stdout
+                    .take()
+                    .ok_or_else(|| LuaError::RuntimeError("missing LSP stdout".to_string()))?;
+                let stderr = child
+                    .stderr
+                    .take()
+                    .ok_or_else(|| LuaError::RuntimeError("missing LSP stderr".to_string()))?;
 
-            let (msg_tx, msg_rx) = unbounded();
-            let (err_tx, err_rx) = unbounded();
-            start_stdout_thread(stdout, msg_tx);
-            start_stderr_thread(stderr, err_tx);
+                let (msg_tx, msg_rx) = unbounded();
+                let (err_tx, err_rx) = unbounded();
+                start_stdout_thread(stdout, msg_tx);
+                start_stderr_thread(stderr, err_tx);
 
-            let id = next_id();
-            TRANSPORTS.lock().insert(
-                id,
-                TransportHandle {
-                    child,
-                    stdin,
-                    messages: msg_rx,
-                    stderr: err_rx,
-                    exit_code: Arc::new(AtomicU64::new(u64::MAX)),
-                },
-            );
-            Ok(id)
-        })?,
+                let id = next_id();
+                TRANSPORTS.lock().insert(
+                    id,
+                    TransportHandle {
+                        child,
+                        stdin,
+                        messages: msg_rx,
+                        stderr: err_rx,
+                        exit_code: Arc::new(AtomicU64::new(u64::MAX)),
+                    },
+                );
+                Ok(id)
+            },
+        )?,
     )?;
 
     module.set(
         "send",
         lua.create_function(|_, (id, message): (u64, LuaValue)| {
-            let payload = lua_to_json(message)
-                .and_then(|value| serde_json::to_vec(&value).map_err(|e| LuaError::RuntimeError(e.to_string())))?;
+            let payload = lua_to_json(message).and_then(|value| {
+                serde_json::to_vec(&value).map_err(|e| LuaError::RuntimeError(e.to_string()))
+            })?;
             let framed = format!("Content-Length: {}\r\n\r\n", payload.len()).into_bytes();
             let mut transports = TRANSPORTS.lock();
             let handle = transports

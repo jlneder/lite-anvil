@@ -7,11 +7,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 
 #[derive(Clone)]
 struct SearchHit {
@@ -83,7 +83,10 @@ fn next_search_id() -> u64 {
 fn preview_text(line: &str, start_col: usize) -> String {
     let start_index = start_col.saturating_sub(80).max(1);
     let mut text = if start_index > 1 {
-        format!("...{}", &line[start_index - 1..line.len().min(256 + start_index - 1)])
+        format!(
+            "...{}",
+            &line[start_index - 1..line.len().min(256 + start_index - 1)]
+        )
     } else {
         line[..line.len().min(256 + start_index - 1)].to_string()
     };
@@ -123,7 +126,9 @@ fn fuzzy_match_line(line: &str, query: &str, no_case: bool) -> Option<usize> {
 
 fn regex_find_start(re: &Regex, line: &str) -> Option<usize> {
     let mut locs = re.capture_locations();
-    re.captures_read(&mut locs, line.as_bytes()).ok().flatten()?;
+    re.captures_read(&mut locs, line.as_bytes())
+        .ok()
+        .flatten()?;
     let (s, _) = locs.get(0)?;
     Some(s + 1)
 }
@@ -131,9 +136,7 @@ fn regex_find_start(re: &Regex, line: &str) -> Option<usize> {
 fn search_file(path: &str, opts: &SearchOpts) -> Result<Vec<SearchHit>, String> {
     let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let regex = match opts.mode {
-        SearchMode::Regex => Some(
-            Regex::new(&opts.query).map_err(|e| e.to_string())?,
-        ),
+        SearchMode::Regex => Some(Regex::new(&opts.query).map_err(|e| e.to_string())?),
         _ => None,
     };
 
@@ -148,7 +151,9 @@ fn search_file(path: &str, opts: &SearchOpts) -> Result<Vec<SearchHit>, String> 
         let found = match opts.mode {
             SearchMode::Plain => {
                 let hay = lower_if(line, opts.no_case);
-                needle.as_ref().and_then(|needle| hay.find(needle).map(|i| i + 1))
+                needle
+                    .as_ref()
+                    .and_then(|needle| hay.find(needle).map(|i| i + 1))
             }
             SearchMode::Regex => regex.as_ref().and_then(|re| regex_find_start(re, line)),
             SearchMode::Fuzzy => fuzzy_match_line(line, &opts.query, opts.no_case),
@@ -221,7 +226,9 @@ fn parse_replace_opts(opts: LuaTable) -> LuaResult<ReplaceOpts> {
         query: opts.get("query")?,
         replace: opts.get("replace")?,
         no_case: opts.get::<Option<bool>>("no_case")?.unwrap_or(false),
-        backup_originals: opts.get::<Option<bool>>("backup_originals")?.unwrap_or(false),
+        backup_originals: opts
+            .get::<Option<bool>>("backup_originals")?
+            .unwrap_or(false),
         query_b: opts.get::<Option<String>>("query_b")?,
         query_b_regex: opts.get::<Option<bool>>("query_b_regex")?.unwrap_or(false),
         query_b_case: opts.get::<Option<bool>>("query_b_case")?.unwrap_or(true),
@@ -240,13 +247,11 @@ fn plain_find(content: &str, query: &str, no_case: bool, start: usize) -> Option
     } else {
         query.to_string()
     };
-    hay[start.saturating_sub(1)..]
-        .find(&needle)
-        .map(|idx| {
-            let s = start + idx;
-            let e = s + needle.len();
-            (s, e)
-        })
+    hay[start.saturating_sub(1)..].find(&needle).map(|idx| {
+        let s = start + idx;
+        let e = s + needle.len();
+        (s, e)
+    })
 }
 
 fn regex_find(content: &str, re: &Regex, start: usize) -> Option<(usize, usize)> {
@@ -272,7 +277,12 @@ fn replace_all_plain(content: &str, query: &str, replace: &str, no_case: bool) -
     (parts.concat(), count)
 }
 
-fn replace_all_regex(content: &str, query: &str, replace: &str, no_case: bool) -> Result<(String, usize), String> {
+fn replace_all_regex(
+    content: &str,
+    query: &str,
+    replace: &str,
+    no_case: bool,
+) -> Result<(String, usize), String> {
     let pat = if no_case {
         format!("(?i:{query})")
     } else {
@@ -323,10 +333,18 @@ fn replace_with_matcher(
 }
 
 fn swap_content(opts: &ReplaceOpts, content: &str) -> Result<(String, usize), String> {
-    let query_b = opts.query_b.clone().ok_or_else(|| "missing swap B query".to_string())?;
+    let query_b = opts
+        .query_b
+        .clone()
+        .ok_or_else(|| "missing swap B query".to_string())?;
     let placeholder = generate_placeholder(content, content.len());
-    let (after_a, count_a) =
-        replace_with_matcher(content, &opts.query, opts.query_a_regex, opts.no_case, &placeholder)?;
+    let (after_a, count_a) = replace_with_matcher(
+        content,
+        &opts.query,
+        opts.query_a_regex,
+        opts.no_case,
+        &placeholder,
+    )?;
 
     let mut parts = Vec::new();
     let mut count_b = 0usize;
@@ -356,7 +374,10 @@ fn swap_content(opts: &ReplaceOpts, content: &str) -> Result<(String, usize), St
     )?;
     count_b += tail_count;
     parts.push(tail_new);
-    Ok((parts.concat().replace(&placeholder, &opts.replace), count_a + count_b))
+    Ok((
+        parts.concat().replace(&placeholder, &opts.replace),
+        count_a + count_b,
+    ))
 }
 
 pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
@@ -503,8 +524,15 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                     continue;
                 };
                 let result = match opts.mode {
-                    ReplaceMode::Plain => Ok(replace_all_plain(&content, &opts.query, &opts.replace, opts.no_case)),
-                    ReplaceMode::Regex => replace_all_regex(&content, &opts.query, &opts.replace, opts.no_case),
+                    ReplaceMode::Plain => Ok(replace_all_plain(
+                        &content,
+                        &opts.query,
+                        &opts.replace,
+                        opts.no_case,
+                    )),
+                    ReplaceMode::Regex => {
+                        replace_all_regex(&content, &opts.query, &opts.replace, opts.no_case)
+                    }
                     ReplaceMode::Swap => swap_content(&opts, &content),
                 };
                 let (new_content, count) = result.map_err(LuaError::RuntimeError)?;

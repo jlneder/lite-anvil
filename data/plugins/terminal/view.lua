@@ -6,6 +6,7 @@ local keymap = require "core.keymap"
 local style = require "core.style"
 local View = require "core.view"
 local terminal = require "terminal"
+local terminal_buffer = require "terminal_buffer"
 local color_schemes = require "..colors"
 
 local TerminalView = View:extend()
@@ -16,12 +17,6 @@ TerminalView.context = "session"
 
 local function rgba(color)
   return { color[1], color[2], color[3], color[4] or 0xff }
-end
-
-local function clamp(v, lo, hi)
-  if v < lo then return lo end
-  if v > hi then return hi end
-  return v
 end
 
 local function hex_to_rgba(hex)
@@ -54,33 +49,6 @@ local function default_cwd()
   return parse_cwd(os.getenv("HOME") or ".")
 end
 
-local function decode_utf8_char(text, i)
-  local b = text:byte(i)
-  if not b then
-    return nil, i + 1
-  end
-  if b < 0x80 then
-    return text:sub(i, i), i + 1
-  elseif b < 0xE0 then
-    return text:sub(i, i + 1), i + 2
-  elseif b < 0xF0 then
-    return text:sub(i, i + 2), i + 3
-  end
-  return text:sub(i, i + 3), i + 4
-end
-
-local function basename(path)
-  return path and path:match("([^/\\]+)$") or path
-end
-
-local function copy_cell(cell)
-  return {
-    char = cell.char,
-    fg = cell.fg,
-    bg = cell.bg,
-  }
-end
-
 function TerminalView:new(options)
   TerminalView.super.new(self)
   self.cursor = "ibeam"
@@ -89,20 +57,14 @@ function TerminalView:new(options)
   self.cwd = options.cwd or default_cwd()
   self.title = options.title or ("Terminal: " .. common.home_encode(self.cwd or "."))
   self.color_scheme = options.color_scheme or config.plugins.terminal.color_scheme or "eterm"
-  self:apply_color_scheme(self.color_scheme)
   self.cols = 0
   self.rows = 0
-  self.screen = {}
-  self.history = {}
   self.scrollback = config.plugins.terminal.scrollback or 5000
-  self.cursor_row = 1
-  self.cursor_col = 1
-  self.escape_state = nil
-  self.escape_buffer = ""
-  self.osc_esc = false
   self.exit_notified = false
   self.last_blink = false
   self.last_dimensions = ""
+  self:apply_color_scheme(self.color_scheme)
+  self.buffer = terminal_buffer.new(80, 24, self.scrollback, self:palette_table(), self.default_fg)
   self:resize_screen(80, 24)
   self:spawn(options.command or self:default_command())
 end
@@ -112,6 +74,14 @@ function TerminalView:get_name()
   return self.title .. suffix
 end
 
+function TerminalView:palette_table()
+  local out = {}
+  for i = 0, 15 do
+    out[#out + 1] = self.palette[i]
+  end
+  return out
+end
+
 function TerminalView:apply_color_scheme(name)
   local scheme, palette = make_palette(name)
   self.color_scheme = name
@@ -119,38 +89,17 @@ function TerminalView:apply_color_scheme(name)
     self.palette = palette
   else
     for i = 0, 15 do
-      if self.palette[i] and palette[i] then
-        for j = 1, 4 do
-          self.palette[i][j] = palette[i][j]
-        end
-      else
-        self.palette[i] = palette[i]
-      end
+      self.palette[i] = palette[i]
     end
   end
 
-  local next_default_fg = scheme.foreground and hex_to_rgba(scheme.foreground) or rgba(style.text)
-  local next_default_bg = scheme.background and hex_to_rgba(scheme.background) or rgba(style.background)
-  local next_cursor = scheme.cursor and hex_to_rgba(scheme.cursor) or rgba(style.caret)
+  self.default_fg = scheme.foreground and hex_to_rgba(scheme.foreground) or rgba(style.text)
+  self.default_bg = scheme.background and hex_to_rgba(scheme.background) or rgba(style.background)
+  self.cursor_color = scheme.cursor and hex_to_rgba(scheme.cursor) or rgba(style.caret)
 
-  if self.default_fg then
-    for i = 1, 4 do self.default_fg[i] = next_default_fg[i] end
-  else
-    self.default_fg = next_default_fg
+  if self.buffer then
+    self.buffer:set_palette(self:palette_table(), self.default_fg)
   end
-  if self.default_bg then
-    for i = 1, 4 do self.default_bg[i] = next_default_bg[i] end
-  else
-    self.default_bg = next_default_bg
-  end
-  if self.cursor_color then
-    for i = 1, 4 do self.cursor_color[i] = next_cursor[i] end
-  else
-    self.cursor_color = next_cursor
-  end
-
-  self.current_fg = self.default_fg
-  self.current_bg = nil
 end
 
 function TerminalView:default_command()
@@ -175,47 +124,17 @@ function TerminalView:get_content_size()
 end
 
 function TerminalView:get_scrollable_size()
-  return (#self.history + self.rows) * self:get_line_height() + style.padding.y * 2
+  return (self.buffer:total_rows()) * self:get_line_height() + style.padding.y * 2
 end
 
 function TerminalView:supports_text_input()
   return true
 end
 
-function TerminalView:make_blank_row(cols)
-  local row = {}
-  for i = 1, cols do
-    row[i] = { char = " ", fg = self.default_fg, bg = nil }
-  end
-  return row
-end
-
 function TerminalView:resize_screen(cols, rows)
-  cols = math.max(1, cols)
-  rows = math.max(1, rows)
-  local old_screen = self.screen
-  local old_rows = self.rows
-  local old_cols = self.cols
-  self.cols = cols
-  self.rows = rows
-  self.screen = {}
-  for row = 1, rows do
-    self.screen[row] = self:make_blank_row(cols)
-  end
-  if old_rows and old_rows > 0 then
-    local copy_rows = math.min(old_rows, rows)
-    for i = 0, copy_rows - 1 do
-      local src = old_screen[old_rows - i]
-      local dst = self.screen[rows - i]
-      if src and dst then
-        for col = 1, math.min(old_cols, cols) do
-          dst[col] = copy_cell(src[col])
-        end
-      end
-    end
-  end
-  self.cursor_row = clamp(self.cursor_row or 1, 1, rows)
-  self.cursor_col = clamp(self.cursor_col or 1, 1, cols)
+  self.cols = math.max(1, cols)
+  self.rows = math.max(1, rows)
+  self.buffer:resize(self.cols, self.rows)
 end
 
 function TerminalView:spawn(command_argv)
@@ -269,11 +188,7 @@ function TerminalView:on_mouse_wheel(dy, dx)
 end
 
 function TerminalView:clear()
-  self.history = {}
-  self.current_fg = self.default_fg
-  self.current_bg = nil
-  self.cursor_row = 1
-  self.cursor_col = 1
+  self.buffer:clear()
   self:resize_screen(self.cols, self.rows)
   self:scroll_to_bottom(true)
 end
@@ -283,241 +198,6 @@ function TerminalView:scroll_to_bottom(force)
   self.scroll.to.y = target
   if force then
     self.scroll.y = target
-  end
-end
-
-function TerminalView:push_history(row)
-  self.history[#self.history + 1] = row
-  if #self.history > self.scrollback then
-    table.remove(self.history, 1)
-  end
-end
-
-function TerminalView:scroll_screen()
-  self:push_history(self.screen[1])
-  table.remove(self.screen, 1)
-  self.screen[self.rows] = self:make_blank_row(self.cols)
-end
-
-function TerminalView:put_char(ch)
-  if self.cursor_col > self.cols then
-    self.cursor_col = 1
-    self.cursor_row = self.cursor_row + 1
-  end
-  if self.cursor_row > self.rows then
-    self:scroll_screen()
-    self.cursor_row = self.rows
-  end
-  local row = self.screen[self.cursor_row]
-  row[self.cursor_col] = {
-    char = ch,
-    fg = self.current_fg,
-    bg = self.current_bg,
-  }
-  self.cursor_col = self.cursor_col + 1
-end
-
-function TerminalView:newline()
-  self.cursor_col = 1
-  self.cursor_row = self.cursor_row + 1
-  if self.cursor_row > self.rows then
-    self:scroll_screen()
-    self.cursor_row = self.rows
-  end
-end
-
-function TerminalView:clear_line(mode)
-  local row = self.screen[self.cursor_row]
-  local start_col, end_col = 1, self.cols
-  if mode == 0 then
-    start_col = self.cursor_col
-  elseif mode == 1 then
-    end_col = self.cursor_col
-  end
-  for col = start_col, end_col do
-    row[col] = { char = " ", fg = self.default_fg, bg = nil }
-  end
-end
-
-function TerminalView:clear_screen(mode)
-  if mode == 2 then
-    for row = 1, self.rows do
-      self.screen[row] = self:make_blank_row(self.cols)
-    end
-    self.cursor_row = 1
-    self.cursor_col = 1
-    return
-  end
-
-  if mode == 0 then
-    self:clear_line(0)
-    for row = self.cursor_row + 1, self.rows do
-      self.screen[row] = self:make_blank_row(self.cols)
-    end
-  elseif mode == 1 then
-    self:clear_line(1)
-    for row = 1, self.cursor_row - 1 do
-      self.screen[row] = self:make_blank_row(self.cols)
-    end
-  end
-end
-
-function TerminalView:ansi_color_256(idx)
-  if idx < 16 then
-    return self.palette[idx]
-  elseif idx < 232 then
-    idx = idx - 16
-    local levels = { 0, 95, 135, 175, 215, 255 }
-    local r = levels[math.floor(idx / 36) % 6 + 1]
-    local g = levels[math.floor(idx / 6) % 6 + 1]
-    local b = levels[idx % 6 + 1]
-    return { r, g, b, 0xff }
-  end
-  local c = 8 + (idx - 232) * 10
-  return { c, c, c, 0xff }
-end
-
-function TerminalView:apply_sgr(params)
-  if #params == 0 then
-    params = { 0 }
-  end
-
-  local i = 1
-  while i <= #params do
-    local code = tonumber(params[i]) or 0
-    if code == 0 then
-      self.current_fg = self.default_fg
-      self.current_bg = nil
-    elseif code == 39 then
-      self.current_fg = self.default_fg
-    elseif code == 49 then
-      self.current_bg = nil
-    elseif code >= 30 and code <= 37 then
-      self.current_fg = self.palette[code - 30]
-    elseif code >= 40 and code <= 47 then
-      self.current_bg = self.palette[code - 40]
-    elseif code >= 90 and code <= 97 then
-      self.current_fg = self.palette[8 + code - 90]
-    elseif code >= 100 and code <= 107 then
-      self.current_bg = self.palette[8 + code - 100]
-    elseif (code == 38 or code == 48) and params[i + 1] then
-      local is_fg = code == 38
-      local mode = tonumber(params[i + 1]) or 0
-      if mode == 5 and params[i + 2] then
-        local color = self:ansi_color_256(tonumber(params[i + 2]) or 0)
-        if is_fg then self.current_fg = color else self.current_bg = color end
-        i = i + 2
-      elseif mode == 2 and params[i + 4] then
-        local color = {
-          tonumber(params[i + 2]) or 0,
-          tonumber(params[i + 3]) or 0,
-          tonumber(params[i + 4]) or 0,
-          0xff,
-        }
-        if is_fg then self.current_fg = color else self.current_bg = color end
-        i = i + 4
-      end
-    end
-    i = i + 1
-  end
-end
-
-function TerminalView:execute_csi(sequence)
-  local final = sequence:sub(-1)
-  local body = sequence:sub(1, -2)
-  local params = {}
-  for item in (body .. ";"):gmatch("(.-);") do
-    params[#params + 1] = item
-  end
-
-  local p1 = tonumber(params[1]) or 0
-  local p2 = tonumber(params[2]) or 0
-
-  if final == "A" then
-    self.cursor_row = clamp(self.cursor_row - math.max(p1, 1), 1, self.rows)
-  elseif final == "B" then
-    self.cursor_row = clamp(self.cursor_row + math.max(p1, 1), 1, self.rows)
-  elseif final == "C" then
-    self.cursor_col = clamp(self.cursor_col + math.max(p1, 1), 1, self.cols)
-  elseif final == "D" then
-    self.cursor_col = clamp(self.cursor_col - math.max(p1, 1), 1, self.cols)
-  elseif final == "H" or final == "f" then
-    self.cursor_row = clamp((tonumber(params[1]) or 1), 1, self.rows)
-    self.cursor_col = clamp((tonumber(params[2]) or 1), 1, self.cols)
-  elseif final == "J" then
-    self:clear_screen(p1)
-  elseif final == "K" then
-    self:clear_line(p1)
-  elseif final == "m" then
-    self:apply_sgr(params)
-  end
-end
-
-function TerminalView:process_output(text)
-  local i = 1
-  while i <= #text do
-    local b = text:byte(i)
-    if self.escape_state == "osc" then
-      if b == 7 then
-        self.escape_state = nil
-      elseif b == 27 then
-        self.osc_esc = true
-      elseif self.osc_esc and b == 92 then
-        self.escape_state = nil
-        self.osc_esc = false
-      else
-        self.osc_esc = false
-      end
-      i = i + 1
-    elseif self.escape_state == "esc" then
-      local ch = text:sub(i, i)
-      if ch == "[" then
-        self.escape_state = "csi"
-        self.escape_buffer = ""
-      elseif ch == "]" then
-        self.escape_state = "osc"
-        self.osc_esc = false
-      elseif ch == "c" then
-        self:clear()
-        self.escape_state = nil
-      else
-        self.escape_state = nil
-      end
-      i = i + 1
-    elseif self.escape_state == "csi" then
-      local ch = text:sub(i, i)
-      self.escape_buffer = self.escape_buffer .. ch
-      if ch:match("[@-~]") then
-        self:execute_csi(self.escape_buffer)
-        self.escape_buffer = ""
-        self.escape_state = nil
-      end
-      i = i + 1
-    elseif b == 27 then
-      self.escape_state = "esc"
-      i = i + 1
-    elseif b == 13 then
-      self.cursor_col = 1
-      i = i + 1
-    elseif b == 10 then
-      self:newline()
-      i = i + 1
-    elseif b == 8 then
-      self.cursor_col = math.max(1, self.cursor_col - 1)
-      i = i + 1
-    elseif b == 9 then
-      local next_tab = math.min(self.cols + 1, self.cursor_col + (8 - ((self.cursor_col - 1) % 8)))
-      while self.cursor_col < next_tab do
-        self:put_char(" ")
-      end
-      i = i + 1
-    elseif b < 32 then
-      i = i + 1
-    else
-      local ch
-      ch, i = decode_utf8_char(text, i)
-      self:put_char(ch)
-    end
   end
 end
 
@@ -547,7 +227,7 @@ function TerminalView:update()
       if not chunk or chunk == "" then
         break
       end
-      self:process_output(chunk)
+      self.buffer:process_output(chunk)
       core.redraw = true
     end
 
@@ -573,42 +253,28 @@ function TerminalView:update()
   end
 end
 
-function TerminalView:get_display_row(index)
-  if index <= #self.history then
-    return self.history[index]
-  end
-  return self.screen[index - #self.history]
-end
-
 function TerminalView:draw_row(row, x, y)
   local cell_w = self:get_char_width()
   local cell_h = self:get_line_height()
-  local tx = x
-
-  local start = 1
-  while start <= self.cols do
-    local bg = row[start].bg
-    local finish = start
-    while finish + 1 <= self.cols and row[finish + 1].bg == bg do
-      finish = finish + 1
+  for _, run in ipairs(row.runs or {}) do
+    if run.bg then
+      renderer.draw_rect(
+        x + (run.start_col - 1) * cell_w,
+        y,
+        (run.end_col - run.start_col + 1) * cell_w,
+        cell_h,
+        run.bg
+      )
     end
-    if bg then
-      renderer.draw_rect(x + (start - 1) * cell_w, y, (finish - start + 1) * cell_w, cell_h, bg)
-    end
-    start = finish + 1
   end
-
-  start = 1
-  while start <= self.cols do
-    local fg = row[start].fg
-    local finish = start
-    local chars = { row[start].char }
-    while finish + 1 <= self.cols and row[finish + 1].fg == fg do
-      finish = finish + 1
-      chars[#chars + 1] = row[finish].char
-    end
-    renderer.draw_text(self.font, table.concat(chars), tx + (start - 1) * cell_w, y + self:get_line_text_y_offset(), fg or self.default_fg)
-    start = finish + 1
+  for _, run in ipairs(row.runs or {}) do
+    renderer.draw_text(
+      self.font,
+      run.text,
+      x + (run.start_col - 1) * cell_w,
+      y + self:get_line_text_y_offset(),
+      run.fg or self.default_fg
+    )
   end
 end
 
@@ -628,12 +294,13 @@ function TerminalView:draw_cursor()
     return
   end
 
-  local row_index = #self.history + self.cursor_row
+  local cursor = self.buffer:cursor()
+  local row_index = cursor.history + cursor.row
   local y = self.position.y + style.padding.y + (row_index - 1) * self:get_line_height() - self.scroll.y
   if y + self:get_line_height() < self.position.y or y > self.position.y + self.size.y then
     return
   end
-  local x = self.position.x + style.padding.x + (self.cursor_col - 1) * self:get_char_width()
+  local x = self.position.x + style.padding.x + (cursor.col - 1) * self:get_char_width()
   renderer.draw_rect(x, y, math.max(1, style.caret_width), self:get_line_height(), self.cursor_color)
 end
 
@@ -641,18 +308,15 @@ function TerminalView:draw()
   self:draw_background(style.background)
   renderer.draw_rect(self.position.x, self.position.y, self.size.x, self.size.y, self.default_bg)
 
-  local total_rows = #self.history + self.rows
+  local total_rows = self.buffer:total_rows()
   local first_row = math.max(1, math.floor(self.scroll.y / self:get_line_height()) + 1)
   local last_row = math.min(total_rows, math.ceil((self.scroll.y + self.size.y) / self:get_line_height()) + 1)
   local x = self.position.x + style.padding.x
 
   core.push_clip_rect(self.position.x, self.position.y, self.size.x, self.size.y)
-  for row_index = first_row, last_row do
-    local row = self:get_display_row(row_index)
-    if row then
-      local y = self.position.y + style.padding.y + (row_index - 1) * self:get_line_height() - self.scroll.y
-      self:draw_row(row, x, y)
-    end
+  for _, row in ipairs(self.buffer:render_rows(first_row, last_row)) do
+    local y = self.position.y + style.padding.y + (row.index - 1) * self:get_line_height() - self.scroll.y
+    self:draw_row(row, x, y)
   end
   self:draw_cursor()
   core.pop_clip_rect()

@@ -1,5 +1,12 @@
 # Change Log
 
+## [0.10.0] - 2026-03-14 — Native LSP, project, command palette picker, terminal emulation.
+
+* Moved LSP config/spec resolution, diagnostics state, and semantic refresh scheduling into Rust.
+* Added a native project model for cached project file lists and path normalization helpers.
+* Added a native picker backend for command, file, branch, and status item ranking.
+* Moved terminal emulation and scrollback buffering into the Rust core.
+
 ## [0.9.0] - 2026-03-14 — Native text buffer core.
 
 * Moved the document text buffer core into Rust.

@@ -11,6 +11,19 @@ local protocol = require "..protocol"
 
 local autocomplete_ok, autocomplete = pcall(require, "plugins.autocomplete")
 local make_location_items
+local native_lsp = nil
+local native_picker = nil
+
+do
+  local ok, mod = pcall(require, "lsp_manager")
+  if ok then
+    native_lsp = mod
+  end
+  ok, mod = pcall(require, "picker")
+  if ok then
+    native_picker = mod
+  end
+end
 
 local manager = {
   config_path = nil,
@@ -254,6 +267,9 @@ local function content_to_text(content)
 end
 
 local function fuzzy_items(items, text)
+  if native_picker then
+    return native_picker.rank_items(items, text or "", "text")
+  end
   local haystack = {}
   for i = 1, #items do
     haystack[i] = items[i].text
@@ -400,7 +416,11 @@ local function publish_diagnostics(client, params)
     return
   end
 
-  manager.diagnostics[uri] = params.diagnostics or {}
+  if native_lsp then
+    native_lsp.publish_diagnostics(uri, incoming_version, params.diagnostics or {})
+  else
+    manager.diagnostics[uri] = params.diagnostics or {}
+  end
   if tracked_state then
     tracked_state.last_diagnostic_version = incoming_version or tracked_state.version
   end
@@ -409,7 +429,7 @@ local function publish_diagnostics(client, params)
   core.status_view:show_message("!", style.accent, string.format(
     "LSP %s: %d diagnostic(s) for %s",
     client.name,
-    #(manager.diagnostics[uri]),
+    #(params.diagnostics or {}),
     label
   ))
   core.redraw = true
@@ -436,7 +456,11 @@ local function get_doc_diagnostics(doc)
   if not doc or not doc.abs_filename then
     return {}
   end
-  return manager.diagnostics[path_to_uri(doc.abs_filename)] or {}
+  local uri = path_to_uri(doc.abs_filename)
+  if native_lsp then
+    return native_lsp.get_diagnostics(uri) or {}
+  end
+  return manager.diagnostics[uri] or {}
 end
 
 local function handle_server_notification(client, message)
@@ -460,6 +484,15 @@ function manager.reload_config()
     manager.config_paths[#manager.config_paths + 1] = join_path(project.path, "lsp.json")
   end
   manager.config_path = manager.config_paths[#manager.config_paths]
+
+  if native_lsp then
+    local ok, count = pcall(native_lsp.reload_config, manager.config_paths)
+    if not ok then
+      core.warn("Failed to parse lsp.json: %s", count)
+      return false
+    end
+    return count > 0
+  end
 
   merge_raw_config(manager.raw_config, builtin_config)
   for _, path in ipairs(manager.config_paths) do
@@ -491,10 +524,21 @@ function manager.start_semantic_refresh_loop()
   core.add_thread(function()
     while true do
       local now = system.get_time()
-      for doc, state in pairs(manager.doc_state) do
-        if state.pending_semantic_refresh and state.pending_semantic_refresh <= now then
-          state.pending_semantic_refresh = nil
-          manager.request_semantic_tokens(doc)
+      if native_lsp then
+        local due = native_lsp.take_due_semantic(now)
+        for _, uri in ipairs(due) do
+          for doc, state in pairs(manager.doc_state) do
+            if state.uri == uri then
+              manager.request_semantic_tokens(doc)
+            end
+          end
+        end
+      else
+        for doc, state in pairs(manager.doc_state) do
+          if state.pending_semantic_refresh and state.pending_semantic_refresh <= now then
+            state.pending_semantic_refresh = nil
+            manager.request_semantic_tokens(doc)
+          end
         end
       end
       coroutine.yield(0.1)
@@ -504,6 +548,17 @@ end
 
 function manager.find_spec_for_doc(doc)
   if not doc or not doc.abs_filename or not doc.syntax or not doc.syntax.name then
+    return nil
+  end
+  if native_lsp then
+    local project = core.root_project()
+    if not project then
+      return nil
+    end
+    local spec = native_lsp.find_spec(doc.syntax.name:lower(), doc.abs_filename, project.path)
+    if spec then
+      return spec, spec.root_dir
+    end
     return nil
   end
   local filetype = doc.syntax.name:lower()
@@ -736,7 +791,11 @@ function manager.schedule_semantic_refresh(doc, delay)
   if not state then
     return
   end
-  state.pending_semantic_refresh = system.get_time() + (delay or 0.35)
+  if native_lsp then
+    native_lsp.schedule_semantic(state.uri, system.get_time(), delay or 0.35)
+  else
+    state.pending_semantic_refresh = system.get_time() + (delay or 0.35)
+  end
 end
 
 function manager.open_doc(doc)
@@ -752,6 +811,9 @@ function manager.open_doc(doc)
     semantic_lines = {},
     last_diagnostic_version = nil,
   }
+  if native_lsp then
+    native_lsp.open_doc(manager.doc_state[doc].uri, manager.doc_state[doc].version)
+  end
 
   client:notify("textDocument/didOpen", {
     textDocument = {
@@ -777,6 +839,9 @@ function manager.on_doc_change(doc)
   end
 
   state.version = doc:get_change_id()
+  if native_lsp then
+    native_lsp.update_doc(state.uri, state.version)
+  end
   state.client:notify("textDocument/didChange", {
     textDocument = {
       uri = state.uri,
@@ -811,7 +876,11 @@ function manager.on_doc_close(doc)
   state.client:notify("textDocument/didClose", {
     textDocument = { uri = state.uri },
   })
-  manager.diagnostics[state.uri] = nil
+  if native_lsp then
+    native_lsp.close_doc(state.uri)
+  else
+    manager.diagnostics[state.uri] = nil
+  end
   manager.doc_state[doc] = nil
   core.redraw = true
 end

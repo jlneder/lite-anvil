@@ -100,7 +100,14 @@ fn status_table(lua: &Lua, root: &str) -> LuaResult<LuaTable> {
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        repo.set("error", if err.is_empty() { "git status failed" } else { &err })?;
+        repo.set(
+            "error",
+            if err.is_empty() {
+                "git status failed"
+            } else {
+                &err
+            },
+        )?;
         return Ok(repo);
     }
 

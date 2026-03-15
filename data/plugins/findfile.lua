@@ -6,11 +6,21 @@ local common = require "core.common"
 local config = require "core.config"
 local keymap = require "core.keymap"
 local native_manifest = nil
+local native_project_model = nil
+local native_picker = nil
 
 do
   local ok, mod = pcall(require, "project_manifest")
   if ok then
     native_manifest = mod
+  end
+  ok, mod = pcall(require, "project_model")
+  if ok then
+    native_project_model = mod
+  end
+  ok, mod = pcall(require, "picker")
+  if ok then
+    native_picker = mod
   end
 end
 
@@ -29,7 +39,29 @@ config.plugins.findfile = common.merge({
 command.add(nil, {
   ["core:find-file"] = function()
     local files, complete = {}, false
-    if native_manifest then
+    if native_project_model then
+      local roots = {}
+      for i, project in ipairs(core.projects) do
+        roots[i] = project.path
+      end
+      local cached = native_project_model.get_all_files(roots, {
+        max_size_bytes = config.file_size_limit * 1e6
+      })
+      for _, filename in ipairs(cached) do
+        if #files > config.plugins.findfile.file_limit then
+          break
+        end
+        for i, project in ipairs(core.projects) do
+          if common.path_belongs_to(filename, project.path) then
+            local info = project:get_file_info(filename)
+            if info and info.type == "file" then
+              files[#files + 1] = i == 1 and filename:sub(#project.path + 2) or common.home_encode(filename)
+            end
+            break
+          end
+        end
+      end
+    elseif native_manifest then
       for i, project in ipairs(core.projects) do
         local cached = native_manifest.get_files(project.path, {
           max_size_bytes = config.file_size_limit * 1e6
@@ -90,7 +122,11 @@ command.add(nil, {
         if original_files and text == "" then 
           return original_files
         end
-        original_files = common.fuzzy_match_with_recents(files, core.visited_files, text)
+        if native_picker then
+          original_files = native_picker.rank_strings(files, text, true, text == "" and core.visited_files or nil)
+        else
+          original_files = common.fuzzy_match_with_recents(files, core.visited_files, text)
+        end
         return original_files
       end,
       cancel = function()

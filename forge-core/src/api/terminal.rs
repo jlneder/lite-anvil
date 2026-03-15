@@ -99,26 +99,32 @@ impl LuaUserData for TerminalHandle {
             }
         });
 
-        methods.add_method("wait", |_, this, timeout_ms: Option<u64>| -> LuaResult<LuaValue> {
-            let start = std::time::Instant::now();
-            let timeout = timeout_ms.unwrap_or(0);
-            let mut inner = this.0.lock();
-            while inner.poll() {
-                if timeout == 0 || start.elapsed().as_millis() as u64 >= timeout {
-                    break;
+        methods.add_method(
+            "wait",
+            |_, this, timeout_ms: Option<u64>| -> LuaResult<LuaValue> {
+                let start = std::time::Instant::now();
+                let timeout = timeout_ms.unwrap_or(0);
+                let mut inner = this.0.lock();
+                while inner.poll() {
+                    if timeout == 0 || start.elapsed().as_millis() as u64 >= timeout {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            if inner.running {
-                Ok(LuaValue::Nil)
-            } else {
-                Ok(LuaValue::Integer(inner.returncode as i64))
-            }
-        });
+                if inner.running {
+                    Ok(LuaValue::Nil)
+                } else {
+                    Ok(LuaValue::Integer(inner.returncode as i64))
+                }
+            },
+        );
 
-        methods.add_method("read", |lua, this, read_size: Option<usize>| -> LuaResult<LuaValue> {
-            g_read(lua, &mut this.0.lock(), read_size.unwrap_or(READ_BUF_SIZE))
-        });
+        methods.add_method(
+            "read",
+            |lua, this, read_size: Option<usize>| -> LuaResult<LuaValue> {
+                g_read(lua, &mut this.0.lock(), read_size.unwrap_or(READ_BUF_SIZE))
+            },
+        );
 
         methods.add_method("write", |_, this, data: LuaString| -> LuaResult<LuaValue> {
             let bytes = data.as_bytes();
@@ -127,11 +133,7 @@ impl LuaUserData for TerminalHandle {
                 return Ok(LuaValue::Nil);
             }
             let ret = unsafe {
-                libc::write(
-                    inner.fd,
-                    bytes.as_ptr() as *const libc::c_void,
-                    bytes.len(),
-                )
+                libc::write(inner.fd, bytes.as_ptr() as *const libc::c_void, bytes.len())
             };
             if ret >= 0 {
                 return Ok(LuaValue::Integer(ret as i64));
@@ -148,29 +150,38 @@ impl LuaUserData for TerminalHandle {
             }
         });
 
-        methods.add_method("resize", |_, this, (cols, rows): (u16, u16)| -> LuaResult<bool> {
-            let inner = this.0.lock();
-            if inner.fd == INVALID_FD {
-                return Ok(false);
-            }
-            let winsz = libc::winsize {
-                ws_row: rows,
-                ws_col: cols,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            };
-            let ok = unsafe { libc::ioctl(inner.fd, libc::TIOCSWINSZ, &winsz) == 0 };
-            if ok {
-                unsafe {
-                    libc::kill(inner.pid, libc::SIGWINCH);
+        methods.add_method(
+            "resize",
+            |_, this, (cols, rows): (u16, u16)| -> LuaResult<bool> {
+                let inner = this.0.lock();
+                if inner.fd == INVALID_FD {
+                    return Ok(false);
                 }
-            }
-            Ok(ok)
-        });
+                let winsz = libc::winsize {
+                    ws_row: rows,
+                    ws_col: cols,
+                    ws_xpixel: 0,
+                    ws_ypixel: 0,
+                };
+                let ok = unsafe { libc::ioctl(inner.fd, libc::TIOCSWINSZ, &winsz) == 0 };
+                if ok {
+                    unsafe {
+                        libc::kill(inner.pid, libc::SIGWINCH);
+                    }
+                }
+                Ok(ok)
+            },
+        );
 
-        methods.add_method("terminate", |_, this, ()| Ok(this.0.lock().signal(libc::SIGTERM)));
-        methods.add_method("kill", |_, this, ()| Ok(this.0.lock().signal(libc::SIGKILL)));
-        methods.add_method("interrupt", |_, this, ()| Ok(this.0.lock().signal(libc::SIGINT)));
+        methods.add_method("terminate", |_, this, ()| {
+            Ok(this.0.lock().signal(libc::SIGTERM))
+        });
+        methods.add_method("kill", |_, this, ()| {
+            Ok(this.0.lock().signal(libc::SIGKILL))
+        });
+        methods.add_method("interrupt", |_, this, ()| {
+            Ok(this.0.lock().signal(libc::SIGINT))
+        });
         methods.add_method("close", |_, this, ()| {
             this.0.lock().close_fd();
             Ok(true)
@@ -216,7 +227,9 @@ fn terminal_spawn(
         cmd_args.push(CString::new(s).map_err(|e| LuaError::RuntimeError(e.to_string()))?);
     }
     if cmd_args.is_empty() {
-        return Err(LuaError::RuntimeError("terminal.spawn: empty command".into()));
+        return Err(LuaError::RuntimeError(
+            "terminal.spawn: empty command".into(),
+        ));
     }
 
     let argv_ptrs: Vec<*const libc::c_char> = cmd_args
@@ -259,7 +272,14 @@ fn terminal_spawn(
     };
 
     let mut master_fd = INVALID_FD;
-    let pid = unsafe { forkpty(&mut master_fd, std::ptr::null_mut(), std::ptr::null(), &winsz) };
+    let pid = unsafe {
+        forkpty(
+            &mut master_fd,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            &winsz,
+        )
+    };
     if pid < 0 {
         return Err(LuaError::RuntimeError(format!(
             "cannot create terminal pty: {}",

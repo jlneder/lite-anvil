@@ -1,17 +1,21 @@
 mod dirmonitor;
 mod doc_native;
 mod git_native;
+mod lsp_manager;
 mod lsp_transport;
 mod markdown;
+mod picker;
 #[cfg(unix)]
 mod process;
 mod project_fs;
 mod project_manifest;
+mod project_model;
 mod project_search;
 mod regex;
 mod symbol_index;
 #[cfg(unix)]
 mod terminal;
+mod terminal_buffer;
 mod tokenizer;
 mod utf8extra;
 
@@ -188,6 +192,9 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     let terminal = make_terminal(lua)?;
     insert(&globals, &pkg_loaded, "terminal", terminal)?;
 
+    let terminal_buffer = terminal_buffer::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "terminal_buffer", terminal_buffer)?;
+
     let utf8extra = utf8extra::make_module(lua)?;
     insert(&globals, &pkg_loaded, "utf8extra", utf8extra)?;
 
@@ -218,6 +225,9 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     let project_manifest = project_manifest::make_module(lua)?;
     insert(&globals, &pkg_loaded, "project_manifest", project_manifest)?;
 
+    let project_model = project_model::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "project_model", project_model)?;
+
     let doc_native = doc_native::make_module(lua)?;
     insert(&globals, &pkg_loaded, "doc_native", doc_native)?;
 
@@ -226,6 +236,12 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
 
     let git_native = git_native::make_module(lua)?;
     insert(&globals, &pkg_loaded, "git_native", git_native)?;
+
+    let picker = picker::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "picker", picker)?;
+
+    let lsp_manager = lsp_manager::make_module(lua)?;
+    insert(&globals, &pkg_loaded, "lsp_manager", lsp_manager)?;
 
     let lsp_transport = lsp_transport::make_module(lua)?;
     insert(&globals, &pkg_loaded, "lsp_transport", lsp_transport)?;

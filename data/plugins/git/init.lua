@@ -5,9 +5,17 @@ local common = require "core.common"
 local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
+local native_picker = nil
 
 local git = require ".status"
 local ui = require ".ui"
+
+do
+  local ok, mod = pcall(require, "picker")
+  if ok then
+    native_picker = mod
+  end
+end
 
 local function active_path()
   local view = core.active_view
@@ -60,6 +68,9 @@ local function prompt_branch_checkout()
       suggest = function(text)
         if not text or text == "" then
           return branches
+        end
+        if native_picker then
+          return native_picker.rank_strings(branches, text)
         end
         return common.fuzzy_match(branches, text)
       end,
