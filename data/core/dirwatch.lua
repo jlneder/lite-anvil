@@ -1,3 +1,4 @@
+local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local dirwatch = {}
@@ -195,7 +196,9 @@ function dirwatch:check(change_callback, scan_time, wait_time)
     end, function(err)
       last_error = err
     end)
-    if last_error ~= nil then error(last_error) end
+    if last_error ~= nil then
+      core.error("dirwatch error: %s", tostring(last_error))
+    end
   end
   local start_time = system.get_time()
   for directory, old_modified in pairs(self.scanned) do

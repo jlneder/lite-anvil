@@ -18,6 +18,16 @@ local Project
 
 local core = {}
 
+local function close_unreferenced_docs()
+  for i = #core.docs, 1, -1 do
+    local doc = core.docs[i]
+    if #core.get_views_referencing_doc(doc) == 0 then
+      table.remove(core.docs, i)
+      doc:on_close()
+    end
+  end
+end
+
 local function get_user_init_filename()
   return USERDIR .. PATHSEP .. "init.lua"
 end
@@ -42,11 +52,13 @@ local function save_session()
       treeview_size = config.plugins.treeview.size
     end
     local open_files = {}
-    local seen_files = {}
-    for _, doc in ipairs(core.docs) do
-      if doc.abs_filename and not seen_files[doc.abs_filename] then
-        seen_files[doc.abs_filename] = true
-        open_files[#open_files + 1] = doc.abs_filename
+    if not core.skip_session_open_files then
+      local seen_files = {}
+      for _, doc in ipairs(core.docs) do
+        if doc.abs_filename and not seen_files[doc.abs_filename] then
+          seen_files[doc.abs_filename] = true
+          open_files[#open_files + 1] = doc.abs_filename
+        end
       end
     end
     local plugin_data = {}
@@ -109,6 +121,10 @@ end
 
 
 function core.set_project(project)
+  if core.root_view then
+    core.root_view:close_all_docviews()
+    close_unreferenced_docs()
+  end
   while #core.projects > 0 do core.remove_project(core.projects[#core.projects], true) end
   local project = core.add_project(project)
   return project
@@ -116,8 +132,8 @@ end
 
 
 function core.open_project(project)
+  core.skip_session_open_files = true
   local project = core.set_project(project)
-  core.root_view:close_all_docviews()
   update_recents_project("add", project.path)
   command.perform("core:restart")
 end
@@ -1045,12 +1061,26 @@ function core.project_absolute_path(path) core.deprecation_log("core.project_abs
 function core.open_doc(filename)
   local new_file = true
   local abs_filename
+  local open_options = nil
   if filename then
     -- normalize filename and set absolute filename then
     -- try to find existing doc for filename
     filename = core.root_project():normalize_path(filename)
     abs_filename = core.root_project():absolute_path(filename)
-    new_file = not system.get_file_info(abs_filename)
+    local info = system.get_file_info(abs_filename)
+    new_file = not info
+    if info and info.type == "file" then
+      local size_mb = info.size / 1e6
+      if size_mb >= (config.large_file.soft_limit_mb or math.huge) then
+        open_options = {
+          large_file = true,
+          file_size = info.size,
+          hard_limited = size_mb >= (config.large_file.hard_limit_mb or math.huge),
+          read_only = config.large_file.read_only ~= false,
+          plain_text = config.large_file.plain_text ~= false,
+        }
+      end
+    end
     for _, doc in ipairs(core.docs) do
       if doc.abs_filename and abs_filename == doc.abs_filename then
         return doc
@@ -1058,8 +1088,15 @@ function core.open_doc(filename)
     end
   end
   -- no existing doc for filename; create new
-  local doc = Doc(filename, abs_filename, new_file)
+  local doc = Doc(filename, abs_filename, new_file, open_options)
   table.insert(core.docs, doc)
+  if doc.large_file_mode then
+    local size_mb = string.format("%.1f", (doc.large_file_size or 0) / 1e6)
+    local mode = doc.hard_limited and "degraded" or "large-file"
+    core.status_view:show_message("i", style.warn,
+      string.format("Opened %s in %s mode (%s MB)", doc:get_name(), mode, size_mb)
+    )
+  end
   core.log_quiet(filename and "Opened doc \"%s\"" or "Opened new doc", filename)
   return doc
 end
@@ -1251,13 +1288,7 @@ function core.step()
   core.redraw = false
 
   -- close unreferenced docs
-  for i = #core.docs, 1, -1 do
-    local doc = core.docs[i]
-    if #core.get_views_referencing_doc(doc) == 0 then
-      table.remove(core.docs, i)
-      doc:on_close()
-    end
-  end
+  close_unreferenced_docs()
 
   -- update window title
   local current_title = get_title_filename(core.active_view)

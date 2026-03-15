@@ -1,5 +1,16 @@
 # Change Log
 
+## [0.12.0] - 2026-03-15 — Large-file mode, project cleanup, terminal reuse, more.
+
+* Close all open docs when changing the active project folder.
+* Add large-file mode with plain-text, read-only fallback and reduced LSP/autocomplete work.
+* Make document open/save I/O failures fail with editor errors instead of hard asserts.
+* Expand the default light and dark editor themes with richer token colors.
+* Add terminal placement commands and configurable terminal reuse modes.
+* Remove deprecated status bar item merging and deprecated command view entry shims.
+* Make dirwatch and LSP JSON/config parsing fail more safely.
+* Removed unused manifest.json file.
+
 ## [0.11.2] - 2026-03-15 — New default themes, light and dark mode toggle.
 
 * Adjusted default dark theme, and added light theme.

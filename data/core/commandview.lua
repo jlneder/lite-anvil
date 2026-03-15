@@ -70,9 +70,7 @@ function CommandView:new()
 end
 
 
----@deprecated
 function CommandView:set_hidden_suggestions()
-  core.warn("Using deprecated function CommandView:set_hidden_suggestions")
   self.state.show_suggestions = false
 end
 
@@ -205,41 +203,12 @@ function CommandView:enter(label, ...)
   if self.state ~= default_state then
     return
   end
-  local options = select(1, ...)
-
-  if type(options) ~= "table" then
-    core.warn("Using CommandView:enter in a deprecated way")
-    local submit, suggest, cancel, validate = ...
-    options = {
-      submit = submit,
-      suggest = suggest,
-      cancel = cancel,
-      validate = validate,
-    }
-  end
-
-  -- Support deprecated CommandView:set_hidden_suggestions
-  -- Remove this when set_hidden_suggestions is not supported anymore
-  if options.show_suggestions == nil then
-    options.show_suggestions = self.state.show_suggestions
-  end
+  local options = assert(type(select(1, ...)) == "table" and select(1, ...),
+    "CommandView:enter expects an options table")
 
   self.state = common.merge(default_state, options)
 
-  -- We need to keep the text entered with CommandView:set_text to
-  -- maintain compatibility with deprecated usage, but still allow
-  -- overwriting with options.text
-  local old_text = self:get_text()
-  if old_text ~= "" then
-    core.warn("Using deprecated function CommandView:set_text")
-  end
-  if options.text or options.select_text then
-    local text = options.text or old_text
-    self:set_text(text, self.state.select_text)
-  end
-  -- Replace with a simple
-  -- self:set_text(self.state.text, self.state.select_text)
-  -- once old usage is removed
+  self:set_text(options.text or "", self.state.select_text)
 
   core.set_active_view(self)
   self:update_suggestions()

@@ -220,6 +220,10 @@ core.add_thread(function()
   end
 
   local function get_symbols(doc)
+    if doc.large_file_mode and config.large_file.disable_autocomplete ~= false then
+      doc.disable_symbols = true
+      return {}
+    end
     if symbol_index and config.symbol_pattern == "[%a_][%w_]*" then
       local state = symbol_index.set_doc_symbols(
         get_doc_id(doc),

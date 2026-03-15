@@ -31,7 +31,10 @@ protocol.completion_kinds = {
 }
 
 function protocol.encode_message(message)
-  local body = json.encode(message)
+  local ok, body = json.encode_safe(message)
+  if not ok then
+    return nil, body
+  end
   return string.format("Content-Length: %d\r\n\r\n%s", #body, body)
 end
 
@@ -45,14 +48,18 @@ function protocol.decode_messages(buffer)
     local header = buffer:sub(1, header_end - 1)
     local content_length = tonumber(header:match("[Cc]ontent%-[Ll]ength:%s*(%d+)"))
     if not content_length then
-      error("invalid LSP message without Content-Length")
+      return messages, buffer, "invalid LSP message without Content-Length"
     end
     local body_start = header_end + 4
     local body_end = body_start + content_length - 1
     if #buffer < body_end then
       break
     end
-    messages[#messages + 1] = json.decode(buffer:sub(body_start, body_end))
+    local ok, decoded = json.decode_safe(buffer:sub(body_start, body_end))
+    if not ok then
+      return messages, buffer, decoded
+    end
+    messages[#messages + 1] = decoded
     buffer = buffer:sub(body_end + 1)
   end
   return messages, buffer

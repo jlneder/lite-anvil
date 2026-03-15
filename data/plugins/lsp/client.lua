@@ -165,7 +165,11 @@ function Client:send(message)
   if not self.process then
     return false, "LSP transport unavailable"
   end
-  self.outgoing[#self.outgoing + 1] = protocol.encode_message(message)
+  local payload, err = protocol.encode_message(message)
+  if not payload then
+    return false, err
+  end
+  self.outgoing[#self.outgoing + 1] = payload
   return true
 end
 

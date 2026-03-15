@@ -232,7 +232,6 @@ function core.run(...)
     function core.set_project(project)
       core.try(save_workspace)
       local project = set_project(project)
-      core.try(load_workspace)
       return project
     end
     local exit = core.exit

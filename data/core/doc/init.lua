@@ -5,6 +5,7 @@ local core = require "core"
 local syntax = require "core.syntax"
 local config = require "core.config"
 local common = require "core.common"
+local style = require "core.style"
 local doc_native = nil
 
 do
@@ -18,6 +19,14 @@ end
 local Doc = Object:extend()
 
 function Doc:__tostring() return "Doc" end
+
+local function show_read_only_message(self)
+  if self._read_only_warned then
+    return
+  end
+  self._read_only_warned = true
+  core.status_view:show_message("!", style.warn, self:get_name() .. " is read-only")
+end
 
 local function split_lines(text)
   local res = {}
@@ -51,7 +60,13 @@ local function apply_native_snapshot(self, snapshot)
 end
 
 
-function Doc:new(filename, abs_filename, new_file)
+function Doc:new(filename, abs_filename, new_file, options)
+  options = options or {}
+  self.large_file_mode = options.large_file == true
+  self.large_file_size = options.file_size
+  self.hard_limited = options.hard_limited == true
+  self.read_only = options.read_only == true
+  self.plain_text_mode = options.plain_text == true
   self.new_file = new_file
   self:reset()
   if filename then
@@ -75,6 +90,7 @@ function Doc:reset()
   self.clean_change_id = 1
   self.highlighter = Highlighter(self)
   self.overwrite = false
+  self._read_only_warned = false
   if doc_native and self.buffer_id then
     apply_native_snapshot(self, doc_native.buffer_reset(self.buffer_id))
   end
@@ -82,6 +98,11 @@ function Doc:reset()
 end
 
 function Doc:reset_syntax()
+  if self.plain_text_mode then
+    self.syntax = syntax.plain_text_syntax
+    self.highlighter:soft_reset()
+    return
+  end
   local header = self:get_text(1, 1, self:position_offset(1, 1, 128))
   local path = self.abs_filename
   if not path and self.filename then
@@ -109,16 +130,26 @@ end
 function Doc:load(filename)
   ensure_native_buffer(self)
   if doc_native and self.buffer_id then
+    local ok, snapshot = pcall(doc_native.buffer_load, self.buffer_id, filename)
+    if not ok or not snapshot then
+      self:reset()
+      core.error("Cannot open file %s: %s", filename, snapshot or "unknown error")
+      return nil, snapshot
+    end
     self:reset()
-    local snapshot = doc_native.buffer_load(self.buffer_id, filename)
     apply_native_snapshot(self, snapshot)
     for i = 1, #self.lines do
       self.highlighter.lines[i] = false
     end
     self:reset_syntax()
-    return
+    return true
   end
-  local fp = assert(io.open(filename, "rb"))
+  local fp, err = io.open(filename, "rb")
+  if not fp then
+    self:reset()
+    core.error("Cannot open file %s: %s", filename, err or "unknown error")
+    return nil, err
+  end
   self:reset()
   self.lines = {}
   local i = 1
@@ -136,6 +167,7 @@ function Doc:load(filename)
   end
   fp:close()
   self:reset_syntax()
+  return true
 end
 
 function Doc:reload()
@@ -148,12 +180,18 @@ function Doc:reload()
 end
 
 function Doc:save(filename, abs_filename)
+  if self.read_only then
+    show_read_only_message(self)
+    return
+  end
   if not filename then
-    assert(self.filename, "no filename set to default to")
+    if not self.filename then
+      error("no filename set to default to")
+    end
     filename = self.filename
     abs_filename = self.abs_filename
-  else
-    assert(self.filename or abs_filename, "calling save on unnamed doc without absolute path")
+  elseif not self.filename and not abs_filename then
+    error("calling save on unnamed doc without absolute path")
   end
 
   if doc_native and self.buffer_id then
@@ -164,7 +202,7 @@ function Doc:save(filename, abs_filename)
     return
   end
 
-  local fp
+  local fp, err
   if PLATFORM == "Windows" then
     -- On Windows, opening a hidden file with wb fails with a permission error.
     -- To get around this, we must open the file as r+b and truncate.
@@ -174,10 +212,14 @@ function Doc:save(filename, abs_filename)
       system.ftruncate(fp)
     else
       -- file probably doesn't exist, create one
-      fp = assert (io.open(abs_filename, "wb"))
+      fp, err = io.open(abs_filename, "wb")
     end
   else
-    fp = assert (io.open(abs_filename, "wb"))
+    fp, err = io.open(abs_filename, "wb")
+  end
+
+  if not fp then
+    error(err or ("unable to open " .. tostring(abs_filename) .. " for writing"))
   end
 
   for _, line in ipairs(self.lines) do
@@ -623,6 +665,10 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
 end
 
 function Doc:insert(line, col, text)
+  if self.read_only then
+    show_read_only_message(self)
+    return
+  end
   self.redo_stack = { idx = 1 }
   -- Reset the clean id when we're pushing something new before it
   if self:get_change_id() < self.clean_change_id then
@@ -634,6 +680,10 @@ function Doc:insert(line, col, text)
 end
 
 function Doc:remove(line1, col1, line2, col2)
+  if self.read_only then
+    show_read_only_message(self)
+    return
+  end
   self.redo_stack = { idx = 1 }
   line1, col1 = self:sanitize_position(line1, col1)
   line2, col2 = self:sanitize_position(line2, col2)
@@ -643,6 +693,10 @@ function Doc:remove(line1, col1, line2, col2)
 end
 
 function Doc:undo()
+  if self.read_only then
+    show_read_only_message(self)
+    return
+  end
   if doc_native and self.buffer_id then
     apply_native_snapshot(self, doc_native.buffer_undo(self.buffer_id))
     self.highlighter:soft_reset()
@@ -653,6 +707,10 @@ function Doc:undo()
 end
 
 function Doc:redo()
+  if self.read_only then
+    show_read_only_message(self)
+    return
+  end
   if doc_native and self.buffer_id then
     apply_native_snapshot(self, doc_native.buffer_redo(self.buffer_id))
     self.highlighter:soft_reset()
@@ -663,6 +721,10 @@ function Doc:redo()
 end
 
 function Doc:apply_edits(edits)
+  if self.read_only then
+    show_read_only_message(self)
+    return false
+  end
   if not doc_native or not self.buffer_id or not edits or #edits == 0 then
     return false
   end

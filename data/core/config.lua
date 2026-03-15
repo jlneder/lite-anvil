@@ -62,6 +62,16 @@ config.force_scrollbar_status = false
 ---@type number
 config.file_size_limit = 10
 
+---Large-file mode settings.
+config.large_file = {
+  soft_limit_mb = 20,
+  hard_limit_mb = 128,
+  read_only = true,
+  plain_text = true,
+  disable_lsp = true,
+  disable_autocomplete = true,
+}
+
 ---A list of files and directories to ignore.
 ---Each element is a Lua pattern, where patterns ending with a forward slash
 ---are recognized as directories while patterns ending with an anchor ("$") are
@@ -200,6 +210,11 @@ config.lsp = {
 config.native_tokenizer = {
   ---Whether to ask the Rust core for token streams before falling back to Lua.
   enabled = true,
+}
+
+config.terminal = {
+  placement = "bottom",
+  reuse_mode = "pane",
 }
 
 ---UI metrics and spacing settings.

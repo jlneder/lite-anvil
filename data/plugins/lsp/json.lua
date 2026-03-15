@@ -71,6 +71,10 @@ function json.encode(value)
   return encode_value(value)
 end
 
+function json.encode_safe(value)
+  return pcall(json.encode, value)
+end
+
 local function decode_error(state, message)
   error(string.format("json decode error at %d: %s", state.pos, message))
 end
@@ -246,6 +250,10 @@ function json.decode(text)
     decode_error(state, "trailing content")
   end
   return value
+end
+
+function json.decode_safe(text)
+  return pcall(json.decode, text)
 end
 
 return json

@@ -53,13 +53,27 @@ config.plugins.terminal = common.merge({
         {"Top Pane", "top"},
       },
     },
+    {
+      label = "Reuse Mode",
+      description = "How new terminal requests reuse existing terminal views.",
+      path = "reuse_mode",
+      type = "selection",
+      default = "pane",
+      values = {
+        {"Same Pane", "pane"},
+        {"Last Terminal", "view"},
+        {"Same Project", "project"},
+        {"Never Reuse", "never"},
+      },
+    },
   },
   shell = os.getenv("SHELL") or "sh",
   shell_args = {},
   scrollback = 5000,
   color_scheme = "eterm",
   close_on_exit = true,
-  open_position = "bottom",
+  open_position = config.terminal.placement or "bottom",
+  reuse_mode = config.terminal.reuse_mode or "pane",
 }, config.plugins.terminal)
 
 local TerminalView = require ".view"
@@ -76,6 +90,21 @@ end
 command.add(nil, {
   ["terminal:new"] = function()
     TerminalView.open(default_cwd())
+  end,
+  ["terminal:new-tab"] = function()
+    TerminalView.open(default_cwd(), nil, nil, "tab")
+  end,
+  ["terminal:new-bottom"] = function()
+    TerminalView.open(default_cwd(), nil, nil, "bottom")
+  end,
+  ["terminal:new-left"] = function()
+    TerminalView.open(default_cwd(), nil, nil, "left")
+  end,
+  ["terminal:new-right"] = function()
+    TerminalView.open(default_cwd(), nil, nil, "right")
+  end,
+  ["terminal:new-top"] = function()
+    TerminalView.open(default_cwd(), nil, nil, "top")
   end,
   ["terminal:new-in-project"] = function()
     local project = core.root_project and core.root_project()

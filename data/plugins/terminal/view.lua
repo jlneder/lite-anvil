@@ -49,6 +49,62 @@ local function default_cwd()
   return parse_cwd(os.getenv("HOME") or ".")
 end
 
+local function walk_nodes(node, fn)
+  if not node then
+    return
+  end
+  if node.type == "leaf" then
+    fn(node)
+    return
+  end
+  walk_nodes(node.a, fn)
+  walk_nodes(node.b, fn)
+end
+
+local function normalize_project_path(path)
+  local project = core.project_for_path and core.project_for_path(path)
+  return project and project.path or nil
+end
+
+local function node_has_terminal(node)
+  for _, view in ipairs(node.views or {}) do
+    if view and view:__tostring() == "TerminalView" then
+      return true
+    end
+  end
+  return false
+end
+
+local function terminal_matches(view, placement, cwd, reuse_mode)
+  if not view or view:__tostring() ~= "TerminalView" then
+    return false
+  end
+  if reuse_mode == "pane" then
+    return view.open_placement == placement
+  end
+  if reuse_mode == "project" then
+    return normalize_project_path(view.cwd) == normalize_project_path(cwd)
+  end
+  return true
+end
+
+local function find_reuse_target(placement, cwd, reuse_mode)
+  local match_view, match_node
+  walk_nodes(core.root_view and core.root_view.root_node, function(node)
+    if match_view or not node_has_terminal(node) then
+      return
+    end
+    for _, view in ipairs(node.views or {}) do
+      if terminal_matches(view, placement, cwd, reuse_mode) then
+        match_view = view
+        match_node = node
+        return
+      end
+    end
+  end)
+  return match_view, match_node
+end
+
 function TerminalView:new(options)
   TerminalView.super.new(self)
   self.cursor = "ibeam"
@@ -60,6 +116,7 @@ function TerminalView:new(options)
   self.cols = 0
   self.rows = 0
   self.scrollback = config.plugins.terminal.scrollback or 5000
+  self.open_placement = options.placement or config.plugins.terminal.open_position or "bottom"
   self.exit_notified = false
   self.last_blink = false
   self.last_dimensions = ""
@@ -325,12 +382,35 @@ function TerminalView:draw()
 end
 
 function TerminalView.open(cwd, command_argv, title, placement)
+  cwd = cwd or default_cwd()
+  placement = placement or config.plugins.terminal.open_position or "bottom"
+  local reuse_mode = config.plugins.terminal.reuse_mode or "pane"
+  if reuse_mode ~= "never" then
+    local reuse_view, reuse_node = find_reuse_target(placement, cwd, reuse_mode)
+    if reuse_view and reuse_mode == "view" then
+      core.set_active_view(reuse_view)
+      return reuse_view
+    elseif reuse_node then
+      local view = TerminalView({
+        cwd = cwd,
+        command = command_argv,
+        title = title,
+        placement = placement,
+      })
+      reuse_node:add_view(view)
+      core.root_view.root_node:update_layout()
+      core.set_active_view(view)
+      return view
+    end
+  end
+
   local view = TerminalView({
-    cwd = cwd or default_cwd(),
+    cwd = cwd,
     command = command_argv,
     title = title,
+    placement = placement,
   })
-  return core.root_view:add_view(view, placement or config.plugins.terminal.open_position or "bottom")
+  return core.root_view:add_view(view, placement)
 end
 
 function TerminalView:rename()

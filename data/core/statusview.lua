@@ -341,6 +341,33 @@ function StatusView:register_docview_items()
     command = "doc:toggle-overwrite",
     separator = StatusView.separator2
   }
+
+  self:add_item({
+    predicate = predicate_docview,
+    name = "doc:mode",
+    alignment = StatusView.Item.RIGHT,
+    get_item = function()
+      local dv = core.active_view
+      if not dv.doc.large_file_mode and not dv.doc.read_only then
+        return {}
+      end
+      local items = {}
+      if dv.doc.large_file_mode then
+        items[#items + 1] = style.warn
+        items[#items + 1] = "LARGE"
+      end
+      if dv.doc.read_only then
+        if #items > 0 then
+          items[#items + 1] = style.dim
+          items[#items + 1] = " "
+        end
+        items[#items + 1] = style.accent
+        items[#items + 1] = "RO"
+      end
+      return items
+    end,
+    separator = StatusView.separator2
+  })
 end
 
 
@@ -669,69 +696,10 @@ function StatusView:draw_item_tooltip(item)
 end
 
 
----Older method of retrieving the status bar items and which is now
----deprecated in favour of core.status_view:add_item().
----@deprecated
----@param nowarn boolean
----@return table left
----@return table right
-function StatusView:get_items(nowarn)
-  if not nowarn and not self.get_items_warn then
-    core.warn(
-      "Overriding StatusView:get_items() is deprecated, "
-      .. "use core.status_view:add_item() instead."
-    )
-    self.get_items_warn = true
-  end
-  return {"{:dummy:}"}, {"{:dummy:}"}
-end
-
-
----Helper function to copy a styled text table into another.
----@param t1 core.statusview.styledtext
----@param t2 core.statusview.styledtext
 local function table_add(t1, t2)
   for _, value in ipairs(t2) do
     table.insert(t1, value)
   end
-end
-
-
----Helper function to merge deprecated items to a temp items table.
----@param destination table
----@param items core.statusview.styledtext
----@param alignment core.statusview.item.alignment
-local function merge_deprecated_items(destination, items, alignment)
-  local start = true
-  local items_start, items_end = {}, {}
-  for i, value in ipairs(items) do
-    if value ~= "{:dummy:}" then
-      if start then
-        table.insert(items_start, i, value)
-      else
-        table.insert(items_end, value)
-      end
-    else
-      start = false
-    end
-  end
-
-  local position = alignment == StatusView.Item.LEFT and "left" or "right"
-
-  local item_start = StatusView.Item({
-    name = "deprecated:"..position.."-start",
-    alignment = alignment,
-    get_item = items_start
-  })
-
-  local item_end = StatusView.Item({
-    name = "deprecated:"..position.."-end",
-    alignment = alignment,
-    get_item = items_end
-  })
-
-  table.insert(destination, 1, item_start)
-  table.insert(destination, item_end)
 end
 
 
@@ -809,11 +777,6 @@ function StatusView:update_active_items()
   ---@type core.statusview.item[]
   local combined_items = {}
   table_add(combined_items, self.items)
-
-  -- load deprecated items for compatibility
-  local dleft, dright = self:get_items(true)
-  merge_deprecated_items(combined_items, dleft, StatusView.Item.LEFT)
-  merge_deprecated_items(combined_items, dright, StatusView.Item.RIGHT)
 
   local lfirst, rfirst = true, true
 

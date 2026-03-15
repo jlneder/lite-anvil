@@ -131,7 +131,7 @@ local function doc_position_from_lsp(doc, position)
 end
 
 local function full_document_text(doc)
-  return table.concat(doc.lines)
+  return doc:get_text(1, 1, math.huge, math.huge)
 end
 
 local function current_docview()
@@ -157,7 +157,8 @@ local function read_json_file(path)
   if not content or content == "" then
     return {}
   end
-  return json.decode(content)
+  local ok, decoded = json.decode_safe(content)
+  return ok and decoded or {}
 end
 
 local function normalize_spec(name, raw)
@@ -816,6 +817,9 @@ function manager.schedule_semantic_refresh(doc, delay)
 end
 
 function manager.open_doc(doc)
+  if doc.large_file_mode then
+    return nil
+  end
   local client = manager.ensure_client(doc)
   if not client or manager.doc_state[doc] then
     return client

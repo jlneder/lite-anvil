@@ -45,7 +45,7 @@ manager.start_semantic_refresh_loop()
 local old_open_doc = core.open_doc
 function core.open_doc(filename)
   local doc = old_open_doc(filename)
-  if doc and doc.abs_filename then
+  if doc and doc.abs_filename and not doc.large_file_mode then
     manager.open_doc(doc)
   end
   return doc
@@ -54,7 +54,7 @@ end
 local old_on_text_change = Doc.on_text_change
 function Doc:on_text_change(change_type)
   old_on_text_change(self, change_type)
-  if self.abs_filename then
+  if self.abs_filename and not self.large_file_mode then
     manager.on_doc_change(self)
   end
 end
@@ -83,6 +83,9 @@ function DocView:draw_line_gutter(line, x, y, width)
   if config.plugins.lsp.inline_diagnostics == false or not self.doc.abs_filename then
     return lh
   end
+  if self.doc.large_file_mode then
+    return lh
+  end
 
   local severity = manager.get_line_diagnostic_severity(self.doc, line)
   if severity then
@@ -99,6 +102,9 @@ local old_draw_overlay = DocView.draw_overlay
 function DocView:draw_overlay()
   old_draw_overlay(self)
   if config.plugins.lsp.inline_diagnostics == false or not self.doc.abs_filename then
+    return
+  end
+  if self.doc.large_file_mode then
     return
   end
 
@@ -128,19 +134,23 @@ end
 
 local old_on_close = Doc.on_close
 function Doc:on_close()
-  manager.on_doc_close(self)
+  if not self.large_file_mode then
+    manager.on_doc_close(self)
+  end
   old_on_close(self)
 end
 
 local old_save = Doc.save
 function Doc:save(...)
   local result = table.pack(old_save(self, ...))
-  manager.on_doc_save(self)
+  if not self.large_file_mode then
+    manager.on_doc_save(self)
+  end
   return table.unpack(result, 1, result.n)
 end
 
 for _, doc in ipairs(core.docs) do
-  if doc.abs_filename then
+  if doc.abs_filename and not doc.large_file_mode then
     manager.open_doc(doc)
   end
 end
