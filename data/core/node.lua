@@ -32,6 +32,7 @@ function Node:new(type)
   self.tab_shift = 0
   self.tab_offset = 1
   self.tab_width = style.tab_width
+  self.tab_title_cache = setmetatable({}, { __mode = "k" })
   self.move_towards = View.move_towards
 end
 
@@ -342,6 +343,20 @@ end
 
 
 function Node:tab_hovered_update(px, py)
+  if not self:should_show_tabs() then
+    self.hovered_tab = nil
+    self.hovered_close = 0
+    self.hovered_scroll_button = 0
+    return
+  end
+  local _, _, _, h = self:get_tab_rect(self.tab_offset)
+  if py < self.position.y or py >= self.position.y + h
+      or px < self.position.x or px >= self.position.x + self.size.x then
+    self.hovered_tab = nil
+    self.hovered_close = 0
+    self.hovered_scroll_button = 0
+    return
+  end
   local tab_index = self:get_tab_overlapping_point(px, py)
   self.hovered_tab = tab_index
   self.hovered_close = 0
@@ -544,7 +559,8 @@ function Node:update()
     for _, view in ipairs(self.views) do
       view:update()
     end
-    self:tab_hovered_update(core.root_view.mouse.x, core.root_view.mouse.y)
+    local mouse = core.root_view.mouse
+    self:tab_hovered_update(mouse.x, mouse.y)
     local tab_width = self:target_tab_width()
     self:move_towards("tab_shift", tab_width * (self.tab_offset - 1), nil, "tabs")
     self:move_towards("tab_width", tab_width, nil, "tabs")
@@ -554,32 +570,62 @@ function Node:update()
   end
 end
 
-function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
+function Node:get_cached_tab_title(view, font, w)
   local text = view and view:get_name() or ""
   local dirty = view and view.doc and view.doc:is_dirty()
+  local cache = self.tab_title_cache[view]
+  local width_key = math.floor(w)
+  if cache
+    and cache.text == text
+    and cache.width == width_key
+    and cache.dirty == dirty
+    and cache.font == font then
+    return cache
+  end
   local dots_width = font:get_width("…")
   local align = "center"
+  local display_text = text
   if dirty then
+    local marker_w = font:get_width("• ")
+    w = math.max(0, w - marker_w)
+  end
+  if font:get_width(display_text) > w then
+    align = "left"
+    for i = 1, #display_text do
+      local reduced_text = display_text:sub(1, #display_text - i)
+      if font:get_width(reduced_text) + dots_width <= w then
+        display_text = reduced_text .. "…"
+        break
+      end
+    end
+  end
+  cache = {
+    text = text,
+    display_text = display_text,
+    width = width_key,
+    dirty = dirty,
+    align = align,
+    font = font,
+  }
+  self.tab_title_cache[view] = cache
+  return cache
+end
+
+function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
+  local cache = self:get_cached_tab_title(view, font, w)
+  local display_text = cache.display_text
+  local align = cache.align
+  if cache.dirty then
     local marker = "• "
     local marker_w = font:get_width(marker)
     common.draw_text(font, style.modified or style.accent, marker, "left", x, y, marker_w, h)
     x = x + marker_w
     w = math.max(0, w - marker_w)
   end
-  if font:get_width(text) > w then
-    align = "left"
-    for i = 1, #text do
-      local reduced_text = text:sub(1, #text - i)
-      if font:get_width(reduced_text) + dots_width <= w then
-        text = reduced_text .. "…"
-        break
-      end
-    end
-  end
   local color = style.dim
   if is_active then color = style.text end
   if is_hovered then color = style.text end
-  common.draw_text(font, color, text, align, x, y, w, h)
+  common.draw_text(font, color, display_text, align, x, y, w, h)
 end
 
 function Node:draw_tab_borders(view, is_active, is_hovered, x, y, w, h, standalone)

@@ -38,13 +38,31 @@ end
 function TitleView:new()
   TitleView.super.new(self)
   self.visible = true
+  self._control_metrics = nil
+end
+
+function TitleView:get_control_metrics()
+  local metrics = self._control_metrics
+  if metrics and metrics.font == style.icon_font then
+    return metrics
+  end
+  local icon_w = style.icon_font:get_width("_")
+  metrics = {
+    font = style.icon_font,
+    width = icon_w,
+    height = style.icon_font:get_height(),
+    spacing = icon_w,
+  }
+  self._control_metrics = metrics
+  return metrics
 end
 
 function TitleView:configure_hit_test(borderless)
   if borderless then
     local title_height = title_view_height()
-    local icon_w = style.icon_font:get_width("_")
-    local icon_spacing = icon_w
+    local metrics = self:get_control_metrics()
+    local icon_w = metrics.width
+    local icon_spacing = metrics.spacing
     local controls_width = (icon_w + icon_spacing) * #title_commands + icon_spacing
     system.set_window_hit_test(core.window, title_height, controls_width, icon_spacing)
     -- core.hit_test_title_height = title_height
@@ -54,6 +72,7 @@ function TitleView:configure_hit_test(borderless)
 end
 
 function TitleView:on_scale_change()
+  self._control_metrics = nil
   self:configure_hit_test(self.visible)
 end
 
@@ -79,8 +98,9 @@ function TitleView:draw_window_title()
 end
 
 function TitleView:each_control_item()
-  local icon_h, icon_w = style.icon_font:get_height(), style.icon_font:get_width("_")
-  local icon_spacing = icon_w
+  local metrics = self:get_control_metrics()
+  local icon_h, icon_w = metrics.height, metrics.width
+  local icon_spacing = metrics.spacing
   local ox, oy = self:get_content_offset()
   ox = ox + self.size.x
   local i, n = 0, #title_commands

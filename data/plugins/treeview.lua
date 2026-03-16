@@ -97,11 +97,15 @@ function TreeView:new()
 
   self.item_icon_width = 0
   self.item_text_spacing = 0
-  self.items_flat = nil
-  self.item_index = {}
   self.items_dirty = true
   self.last_project_count = 0
   self.last_tree_generation = 0
+  self.visible_count = 0
+  self.model_roots = {}
+  self.model_opts = nil
+  self.project_roots = {}
+  self.range_cache = { start_row = 0, end_row = 0, items = {} }
+  self.text_width_cache = {}
 end
 
 
@@ -125,62 +129,94 @@ function TreeView:get_item_height()
   return style.font:get_height() + style.padding.y
 end
 
-
-function TreeView:get_items(project, path, x, y, w, h)
-  if self.items_dirty then self:rebuild_items() end
-  local count_lines = 0
-  for i, item in ipairs(self.items_flat or {}) do
-    count_lines = i
-    coroutine.yield(item, x, y + (i - 1) * h, w, h)
-  end
-  return count_lines
-end
-
-
 function TreeView:each_item()
   return coroutine.wrap(function()
     local ox, oy = self:get_content_offset()
     local h = self:get_item_height()
-    if self.items_dirty then self:rebuild_items() end
-    self.count_lines = #(self.items_flat or {})
-    for i, item in ipairs(self.items_flat or {}) do
+    self:sync_model()
+    self.count_lines = self.visible_count
+    for i = 1, self.visible_count do
+      local item = self:get_item_by_row(i)
       coroutine.yield(item, ox, oy + style.padding.y + h * (i - 1), self.size.x, h)
     end
   end)
 end
 
 
-function TreeView:rebuild_items()
-  self.items_flat = {}
-  self.item_index = {}
-  if native_tree_model then
-    local roots = tree_roots()
-    local opts = tree_model_opts(self)
-    native_tree_model.sync_roots(roots, opts)
-    self.last_tree_generation = native_tree_model.generation()
-    local items = native_tree_model.get_visible_items(roots, opts)
-    for i, item in ipairs(items) do
-      item.project = project_by_root(item.project_root)
-      item.filename = item.name
-      self.items_flat[i] = item
-      self.item_index[item.abs_filename] = i
-    end
+function TreeView:sync_model()
+  if not self.items_dirty and not (#core.projects ~= self.last_project_count) then
+    return
   end
-  self.count_lines = #self.items_flat
+  if native_tree_model then
+    self.model_roots = tree_roots()
+    self.project_roots = {}
+    for _, project in ipairs(core.projects) do
+      self.project_roots[project.path] = project
+    end
+    self.model_opts = tree_model_opts(self)
+    native_tree_model.sync_roots(self.model_roots, self.model_opts)
+    self.last_tree_generation = native_tree_model.generation()
+    self.visible_count = native_tree_model.visible_count(self.model_roots)
+  else
+    self.visible_count = 0
+    self.model_roots = {}
+    self.model_opts = nil
+  end
+  self.count_lines = self.visible_count
   self.items_dirty = false
   self.last_project_count = #core.projects
+  self.range_cache.start_row = 0
+  self.range_cache.end_row = 0
+  self.range_cache.items = {}
+end
+
+function TreeView:get_item_by_row(row)
+  self:sync_model()
+  if not native_tree_model or row < 1 or row > self.visible_count then
+    return nil
+  end
+  if row >= self.range_cache.start_row and row <= self.range_cache.end_row then
+    return self.range_cache.items[row - self.range_cache.start_row + 1]
+  end
+  local item = native_tree_model.item_at(self.model_roots, row)
+  if item then
+    item.project = self.project_roots[item.project_root]
+    item.filename = item.name
+  end
+  return item
+end
+
+function TreeView:get_items_in_range(start_row, end_row)
+  self:sync_model()
+  if not native_tree_model or start_row < 1 or end_row < start_row then
+    return {}
+  end
+  start_row = common.clamp(start_row, 1, self.visible_count)
+  end_row = common.clamp(end_row, 1, self.visible_count)
+  if start_row == self.range_cache.start_row and end_row == self.range_cache.end_row then
+    return self.range_cache.items
+  end
+  local items = native_tree_model.items_in_range(self.model_roots, start_row, end_row)
+  for i, item in ipairs(items) do
+    item.project = self.project_roots[item.project_root]
+    item.filename = item.name
+  end
+  self.range_cache.start_row = start_row
+  self.range_cache.end_row = end_row
+  self.range_cache.items = items
+  return items
 end
 
 
 function TreeView:resolve_path(path)
   if not path then return nil end
-  if self.items_dirty then self:rebuild_items() end
-  local idx = self.item_index[path]
+  self:sync_model()
+  local idx = native_tree_model and native_tree_model.get_row(self.model_roots, path)
   if idx then
     local ox, oy = self:get_content_offset()
     local h = self:get_item_height()
     local y = oy + style.padding.y + h * (idx - 1)
-    return self.items_flat[idx], ox, y, self.size.x, h
+    return self:get_item_by_row(idx), ox, y, self.size.x, h
   end
 end
 
@@ -246,7 +282,7 @@ function TreeView:set_selection_to_path(path, expand, scroll_to, instant)
     native_tree_model.expand_to(path)
     self.items_dirty = true
   end
-  if self.items_dirty then self:rebuild_items() end
+  self:sync_model()
   local to_select, _, to_select_y = self:resolve_path(path)
   if to_select then
     self:set_selection(to_select, scroll_to and to_select_y, true, instant)
@@ -256,10 +292,18 @@ end
 
 
 function TreeView:get_text_bounding_box(item, x, y, w, h)
-  local icon_width = style.icon_font:get_width("D")
+  local icon_width = self.item_icon_width
   local xoffset = item.depth * style.padding.x + style.padding.x + icon_width
   x = x + xoffset
-  w = style.font:get_width(item.name) + 2 * style.padding.x
+  local cached_width = self.text_width_cache[item.abs_filename]
+  if not cached_width or cached_width.name ~= item.name then
+    cached_width = {
+      name = item.name,
+      width = style.font:get_width(item.name),
+    }
+    self.text_width_cache[item.abs_filename] = cached_width
+  end
+  w = cached_width.width + 2 * style.padding.x
   return x, y, w, h
 end
 
@@ -274,13 +318,13 @@ function TreeView:on_mouse_moved(px, py, ...)
     return
   end
 
-  if self.items_dirty then self:rebuild_items() end
+  self:sync_model()
 
   local ox, oy = self:get_content_offset()
   local h = self:get_item_height()
   local pad = style.padding.y
   local row = math.floor((py - oy - pad) / h)
-  local item = (row >= 0 and self.items_flat) and self.items_flat[row + 1]
+  local item = row >= 0 and self:get_item_by_row(row + 1) or nil
 
   local item_changed, tooltip_changed
   if item and px > ox and px <= ox + self.size.x then
@@ -333,9 +377,6 @@ function TreeView:update()
     self.tooltip.alpha = 0
   end
 
-  self.item_icon_width = style.icon_font:get_width("D")
-  self.item_text_spacing = style.icon_font:get_width("f") / 2
-
   -- this will make sure hovered_item is updated
   local dy = math.abs(self.last_scroll_y - self.scroll.y)
   if dy > 0 then
@@ -368,6 +409,12 @@ function TreeView:update()
   end
 
   TreeView.super.update(self)
+end
+
+function TreeView:on_scale_change()
+  self.item_icon_width = style.icon_font:get_width("D")
+  self.item_text_spacing = style.icon_font:get_width("f") / 2
+  self.text_width_cache = {}
 end
 
 
@@ -483,17 +530,20 @@ function TreeView:draw()
   if #core.projects ~= self.last_project_count then
     self.items_dirty = true
   end
-  if self.items_dirty then self:rebuild_items() end
+  self:sync_model()
 
   local _y, _h = self.position.y, self.size.y
   local ox, oy = self:get_content_offset()
   local h = self:get_item_height()
   local pad = style.padding.y
+  local first_row = math.max(1, math.floor((_y - oy - pad) / h) + 1)
+  local last_row = math.min(self.visible_count, math.floor((_y + _h - oy - pad) / h) + 1)
+  local items = self:get_items_in_range(first_row, last_row)
 
-  for i, item in ipairs(self.items_flat) do
-    local y = oy + pad + (i - 1) * h
-    if y + h >= _y then
-      if y >= _y + _h then break end
+  for offset, item in ipairs(items) do
+    if item then
+      local row = first_row + offset - 1
+      local y = oy + pad + (row - 1) * h
       self:draw_item(item,
         item.abs_filename == self.selected_path,
         item.abs_filename == self.hovered_path,
@@ -521,15 +571,15 @@ end
 
 
 function TreeView:get_item(item, where)
-  if self.items_dirty then self:rebuild_items() end
-  local idx = item and self.item_index[item.abs_filename] or nil
+  self:sync_model()
+  local idx = item and native_tree_model and native_tree_model.get_row(self.model_roots, item.abs_filename) or nil
   if not idx then
-    idx = where >= 0 and 1 or #self.items_flat
+    idx = where >= 0 and 1 or self.visible_count
   else
     idx = idx + where
   end
-  idx = common.clamp(idx, 1, #self.items_flat)
-  local target = self.items_flat[idx]
+  idx = common.clamp(idx, 1, self.visible_count)
+  local target = self:get_item_by_row(idx)
   if target then
     return self:resolve_path(target.abs_filename)
   end
@@ -573,6 +623,7 @@ end
 
 -- init
 view = TreeView()
+view:on_scale_change()
 local node = core.root_view:get_active_node()
 view.node = node:split("left", view, {x = true}, true)
 

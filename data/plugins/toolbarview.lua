@@ -24,6 +24,7 @@ function ToolbarView:new()
     {symbol = "B", command = "core:find-command"},
     {symbol = "P", command = "core:open-user-module"},
   }
+  self._icon_metrics = nil
 end
 
 
@@ -49,14 +50,37 @@ function ToolbarView:toggle_visible()
 end
 
 function ToolbarView:get_icon_width()
+  return self:get_icon_metrics().width
+end
+
+function ToolbarView:get_icon_metrics()
+  local metrics = self._icon_metrics
+  if metrics and metrics.font == self.toolbar_font then
+    return metrics
+  end
   local max_width = 0
-  for i,v in ipairs(self.toolbar_commands) do max_width = math.max(max_width, (v.font or self.toolbar_font):get_width(v.symbol)) end
-  return max_width
+  for _, v in ipairs(self.toolbar_commands) do
+    max_width = math.max(max_width, (v.font or self.toolbar_font):get_width(v.symbol))
+  end
+  metrics = {
+    font = self.toolbar_font,
+    width = max_width,
+    height = self.toolbar_font:get_height(),
+    spacing = max_width / 2,
+  }
+  self._icon_metrics = metrics
+  return metrics
+end
+
+function ToolbarView:on_scale_change()
+  self.toolbar_font = style.get_icon_big_font()
+  self._icon_metrics = nil
 end
 
 function ToolbarView:each_item()
-  local icon_h, icon_w = self.toolbar_font:get_height(), self:get_icon_width()
-  local toolbar_spacing = icon_w / 2
+  local metrics = self:get_icon_metrics()
+  local icon_h, icon_w = metrics.height, metrics.width
+  local toolbar_spacing = metrics.spacing
   local ox, oy = self:get_content_offset()
   local index = 0
   local iter = function()
@@ -73,8 +97,9 @@ end
 
 
 function ToolbarView:get_min_width()
-  local icon_w = self:get_icon_width()
-  local space = icon_w / 2
+  local metrics = self:get_icon_metrics()
+  local icon_w = metrics.width
+  local space = metrics.spacing
   return 2 * style.padding.x + (icon_w + space) * #self.toolbar_commands - space
 end
 

@@ -33,9 +33,26 @@ struct SearchHandle {
     done: bool,
 }
 
+enum ReplaceMsg {
+    Done {
+        replaced_count: usize,
+        replaced_files: usize,
+    },
+    Error(String),
+}
+
+struct ReplaceHandle {
+    rx: Receiver<ReplaceMsg>,
+    cancel: Arc<AtomicBool>,
+    done: bool,
+}
+
 static SEARCH_HANDLES: Lazy<Mutex<HashMap<u64, SearchHandle>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static REPLACE_HANDLES: Lazy<Mutex<HashMap<u64, ReplaceHandle>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 static NEXT_SEARCH_ID: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(1));
+static NEXT_REPLACE_ID: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(1));
 
 #[derive(Clone)]
 enum SearchMode {
@@ -75,6 +92,13 @@ struct ReplaceOpts {
 
 fn next_search_id() -> u64 {
     let mut next = NEXT_SEARCH_ID.lock();
+    let id = *next;
+    *next += 1;
+    id
+}
+
+fn next_replace_id() -> u64 {
+    let mut next = NEXT_REPLACE_ID.lock();
     let id = *next;
     *next += 1;
     id
@@ -556,6 +580,139 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             out.set("replaced_count", replaced_count)?;
             out.set("replaced_files", replaced_files)?;
             Ok(out)
+        })?,
+    )?;
+
+    module.set(
+        "replace_async",
+        lua.create_function(|_, opts: LuaTable| {
+            let opts = parse_replace_opts(opts)?;
+            let (tx, rx) = unbounded::<ReplaceMsg>();
+            let cancel = Arc::new(AtomicBool::new(false));
+            let cancel_thread = Arc::clone(&cancel);
+            std::thread::spawn(move || {
+                let mut replaced_count = 0usize;
+                let mut replaced_files = 0usize;
+                for file in &opts.files {
+                    if cancel_thread.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let path = Path::new(file);
+                    let Ok(content) = fs::read_to_string(path) else {
+                        continue;
+                    };
+                    let result = match opts.mode {
+                        ReplaceMode::Plain => Ok(replace_all_plain(
+                            &content,
+                            &opts.query,
+                            &opts.replace,
+                            opts.no_case,
+                        )),
+                        ReplaceMode::Regex => {
+                            replace_all_regex(&content, &opts.query, &opts.replace, opts.no_case)
+                        }
+                        ReplaceMode::Swap => swap_content(&opts, &content),
+                    };
+                    let (new_content, count) = match result {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let _ = tx.send(ReplaceMsg::Error(err));
+                            #[cfg(feature = "sdl")]
+                            crate::window::push_wakeup_event();
+                            return;
+                        }
+                    };
+                    if count == 0 {
+                        continue;
+                    }
+                    if opts.backup_originals {
+                        let _ = fs::write(format!("{file}.bak"), &content);
+                    }
+                    if let Err(err) = fs::write(path, new_content) {
+                        let _ = tx.send(ReplaceMsg::Error(err.to_string()));
+                        #[cfg(feature = "sdl")]
+                        crate::window::push_wakeup_event();
+                        return;
+                    }
+                    replaced_count += count;
+                    replaced_files += 1;
+                }
+                let _ = tx.send(ReplaceMsg::Done {
+                    replaced_count,
+                    replaced_files,
+                });
+                #[cfg(feature = "sdl")]
+                crate::window::push_wakeup_event();
+            });
+            let id = next_replace_id();
+            REPLACE_HANDLES.lock().insert(
+                id,
+                ReplaceHandle {
+                    rx,
+                    cancel,
+                    done: false,
+                },
+            );
+            Ok(id)
+        })?,
+    )?;
+
+    module.set(
+        "replace_poll",
+        lua.create_function(|lua, handle_id: u64| {
+            let mut handles = REPLACE_HANDLES.lock();
+            let Some(handle) = handles.get_mut(&handle_id) else {
+                return Ok(LuaValue::Nil);
+            };
+
+            let out = lua.create_table()?;
+            let mut replaced_count = None::<usize>;
+            let mut replaced_files = None::<usize>;
+            let mut error = None::<String>;
+
+            while let Ok(msg) = handle.rx.try_recv() {
+                match msg {
+                    ReplaceMsg::Done {
+                        replaced_count: count,
+                        replaced_files: files,
+                    } => {
+                        replaced_count = Some(count);
+                        replaced_files = Some(files);
+                        handle.done = true;
+                    }
+                    ReplaceMsg::Error(err) => {
+                        error = Some(err);
+                        handle.done = true;
+                    }
+                }
+            }
+
+            out.set("done", handle.done)?;
+            if let Some(count) = replaced_count {
+                out.set("replaced_count", count)?;
+            }
+            if let Some(files) = replaced_files {
+                out.set("replaced_files", files)?;
+            }
+            if let Some(err) = error {
+                out.set("error", err)?;
+            }
+            if handle.done {
+                handles.remove(&handle_id);
+            }
+            Ok(LuaValue::Table(out))
+        })?,
+    )?;
+
+    module.set(
+        "replace_cancel",
+        lua.create_function(|_, handle_id: u64| {
+            if let Some(handle) = REPLACE_HANDLES.lock().remove(&handle_id) {
+                handle.cancel.store(true, Ordering::Relaxed);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
         })?,
     )?;
 

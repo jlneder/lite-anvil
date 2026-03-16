@@ -70,6 +70,9 @@ local function update_items_size(items, update_binding)
       item.info = keymap.get_binding_display(item.command)
     end
     local lw, lh = get_item_size(item)
+    item.cm_width = lw
+    item.cm_height = lh
+    item.cm_y = height
     width = math.max(width, lw)
     height = height + lh
   end
@@ -128,13 +131,12 @@ end
 ---@return fun(): number, core.contextmenu.item, number, number, number, number
 function ContextMenu:each_item()
   local x, y, w = self.position.x, self.position.y, self.items.width
-  local oy = y
   return coroutine.wrap(function()
     for i, item in ipairs(self.items) do
-      local _, lh = get_item_size(item)
-      if y - oy > self.height then break end
-      coroutine.yield(i, item, x, y, w, lh)
-      y = y + lh
+      local item_y = y + (item.cm_y or 0)
+      local lh = item.cm_height or select(2, get_item_size(item))
+      if item_y - y > self.height then break end
+      coroutine.yield(i, item, x, item_y, w, lh)
     end
   end)
 end

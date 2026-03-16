@@ -19,8 +19,8 @@ mod symbol_index;
 #[cfg(unix)]
 mod terminal;
 mod terminal_buffer;
-mod tree_model;
 mod tokenizer;
+mod tree_model;
 mod utf8extra;
 
 use mlua::prelude::*;

@@ -1,6 +1,6 @@
 [package]
 name = "forge-core"
-version = "0.13.7"
+version = "0.13.8"
 edition = "2024"
 rust-version = "1.85"
 description = "Lite-Anvil text editor — Rust core"

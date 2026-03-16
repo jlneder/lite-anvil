@@ -75,6 +75,7 @@ struct GitignoreRule {
 #[derive(Clone)]
 struct ProjectSnapshot {
     nodes: Vec<TreeNode>,
+    path_to_node: HashMap<String, usize>,
     visible: Vec<usize>,
     visible_index: HashMap<String, usize>,
 }
@@ -473,10 +474,19 @@ fn matches_compiled_lua(pattern: &CompiledLuaPattern, text: &str) -> bool {
     pattern.regex.is_match(text.as_bytes()).unwrap_or(false)
 }
 
-fn matches_ignore_rule(rule: &CompiledIgnoreRule, basename: &str, fullname: &str, kind: NodeKind) -> bool {
+fn matches_ignore_rule(
+    rule: &CompiledIgnoreRule,
+    basename: &str,
+    fullname: &str,
+    kind: NodeKind,
+) -> bool {
     let test = if rule.use_path { fullname } else { basename };
     if rule.match_dir {
-        kind == NodeKind::Dir && rule.regex.is_match(format!("{test}/").as_bytes()).unwrap_or(false)
+        kind == NodeKind::Dir
+            && rule
+                .regex
+                .is_match(format!("{test}/").as_bytes())
+                .unwrap_or(false)
     } else {
         rule.regex.is_match(test.as_bytes()).unwrap_or(false)
     }
@@ -571,13 +581,9 @@ fn is_ignored(
 
     if !opts.gitignore_additional_patterns.is_empty() {
         let rel = relative_to(git_root, path).unwrap_or_else(|| basename.clone());
-        if opts
-            .gitignore_additional_patterns
-            .iter()
-            .any(|pattern| {
-                matches_compiled_lua(pattern, &rel) || matches_compiled_lua(pattern, &basename)
-            })
-        {
+        if opts.gitignore_additional_patterns.iter().any(|pattern| {
+            matches_compiled_lua(pattern, &rel) || matches_compiled_lua(pattern, &basename)
+        }) {
             return true;
         }
     }
@@ -602,6 +608,84 @@ fn rebuild_visible(snapshot: &mut ProjectSnapshot) {
     }
 }
 
+fn reindex_visible_from(snapshot: &mut ProjectSnapshot, start: usize) {
+    for idx in start..snapshot.visible.len() {
+        let path = snapshot.nodes[snapshot.visible[idx]].abs_path.clone();
+        snapshot.visible_index.insert(path, idx + 1);
+    }
+}
+
+fn collect_visible_subtree(snapshot: &ProjectSnapshot, node_ids: &[usize], out: &mut Vec<usize>) {
+    let mut stack: Vec<usize> = node_ids.iter().rev().copied().collect();
+    while let Some(node_id) = stack.pop() {
+        out.push(node_id);
+        let node = &snapshot.nodes[node_id];
+        if node.kind == NodeKind::Dir && node.expanded {
+            for child in node.children.iter().rev() {
+                stack.push(*child);
+            }
+        }
+    }
+}
+
+fn collapse_visible_subtree(snapshot: &mut ProjectSnapshot, node_id: usize) -> bool {
+    let Some(row) = snapshot
+        .visible_index
+        .get(&snapshot.nodes[node_id].abs_path)
+        .copied()
+    else {
+        return false;
+    };
+    let base_depth = snapshot.nodes[node_id].depth;
+    let start = row;
+    let mut end = start;
+    while end < snapshot.visible.len() {
+        let child_id = snapshot.visible[end];
+        if snapshot.nodes[child_id].depth <= base_depth {
+            break;
+        }
+        end += 1;
+    }
+    if end == start {
+        return false;
+    }
+    for removed_id in snapshot.visible.drain(start..end) {
+        let path = snapshot.nodes[removed_id].abs_path.clone();
+        snapshot.visible_index.remove(&path);
+    }
+    reindex_visible_from(snapshot, start);
+    true
+}
+
+fn expand_visible_subtree(snapshot: &mut ProjectSnapshot, node_id: usize) -> bool {
+    if !snapshot.nodes[node_id].explored {
+        return false;
+    }
+    let Some(row) = snapshot
+        .visible_index
+        .get(&snapshot.nodes[node_id].abs_path)
+        .copied()
+    else {
+        return false;
+    };
+    let mut inserted = Vec::new();
+    let children = snapshot.nodes[node_id].children.clone();
+    collect_visible_subtree(snapshot, &children, &mut inserted);
+    if inserted.is_empty() {
+        return false;
+    }
+    let insert_at = row;
+    snapshot
+        .visible
+        .splice(insert_at..insert_at, inserted.iter().copied());
+    for inserted_id in inserted {
+        let path = snapshot.nodes[inserted_id].abs_path.clone();
+        snapshot.visible_index.insert(path, 0);
+    }
+    reindex_visible_from(snapshot, insert_at);
+    true
+}
+
 fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) -> ProjectSnapshot {
     let root = normalize_path(root);
     let git_root = find_git_root(&root).unwrap_or_else(|| root.clone());
@@ -617,6 +701,8 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
         explored: false,
         project_root: root.clone(),
     }];
+    let mut path_to_node = HashMap::new();
+    path_to_node.insert(root.clone(), 0);
     let mut stack = vec![(0usize, PathBuf::from(&root))];
 
     while let Some((parent_id, path)) = stack.pop() {
@@ -650,6 +736,7 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
                 explored: false,
                 project_root: root.clone(),
             });
+            path_to_node.insert(child_path.clone(), child_id);
             children.push(child_id);
             // Only recurse into directories that are currently expanded.
             // Collapsed dirs are represented as leaf nodes until expanded.
@@ -665,6 +752,7 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
 
     let mut snapshot = ProjectSnapshot {
         nodes,
+        path_to_node,
         visible: Vec::new(),
         visible_index: HashMap::new(),
     };
@@ -879,12 +967,110 @@ fn prune_roots(roots: &[String]) {
     TREES.lock().retain(|root, _| keep.contains(root));
 }
 
-fn collect_snapshots(roots: &[String]) -> Vec<ProjectSnapshot> {
+fn ensure_roots(roots: &[String], opts: &TreeOptionsKey) -> LuaResult<()> {
+    for root in roots {
+        ensure_tree(root, opts)?;
+    }
+    prune_roots(roots);
+    Ok(())
+}
+
+fn visible_count_for_roots(roots: &[String]) -> usize {
     let trees = TREES.lock();
-    roots.iter()
+    roots
+        .iter()
         .filter_map(|root| trees.get(root))
-        .filter_map(|entry| entry.snapshot.lock().clone())
-        .collect()
+        .map(|entry| {
+            entry
+                .snapshot
+                .lock()
+                .as_ref()
+                .map_or(0usize, |snapshot| snapshot.visible.len())
+        })
+        .sum()
+}
+
+fn row_item_for_roots(lua: &Lua, roots: &[String], row: usize) -> LuaResult<LuaValue> {
+    if row == 0 {
+        return Ok(LuaValue::Nil);
+    }
+    let trees = TREES.lock();
+    let mut offset = 0usize;
+    for root in roots {
+        let Some(entry) = trees.get(root) else {
+            continue;
+        };
+        let snapshot_guard = entry.snapshot.lock();
+        let Some(snapshot) = snapshot_guard.as_ref() else {
+            continue;
+        };
+        let len = snapshot.visible.len();
+        if row <= offset + len {
+            let node_id = snapshot.visible[row - offset - 1];
+            return Ok(LuaValue::Table(item_to_lua(lua, &snapshot.nodes[node_id])?));
+        }
+        offset += len;
+    }
+    Ok(LuaValue::Nil)
+}
+
+fn items_for_range_in_roots(
+    lua: &Lua,
+    roots: &[String],
+    start_row: usize,
+    end_row: usize,
+) -> LuaResult<LuaTable> {
+    let out_len = if end_row >= start_row {
+        end_row - start_row + 1
+    } else {
+        0
+    };
+    let out = lua.create_table_with_capacity(out_len, 0)?;
+    if start_row == 0 || end_row < start_row {
+        return Ok(out);
+    }
+    let trees = TREES.lock();
+    let mut global_row = 1usize;
+    let mut out_idx = 1i64;
+    for root in roots {
+        let Some(entry) = trees.get(root) else {
+            continue;
+        };
+        let snapshot_guard = entry.snapshot.lock();
+        let Some(snapshot) = snapshot_guard.as_ref() else {
+            continue;
+        };
+        for node_id in &snapshot.visible {
+            if global_row >= start_row && global_row <= end_row {
+                out.raw_set(out_idx, item_to_lua(lua, &snapshot.nodes[*node_id])?)?;
+                out_idx += 1;
+            }
+            if global_row > end_row {
+                return Ok(out);
+            }
+            global_row += 1;
+        }
+    }
+    Ok(out)
+}
+
+fn row_for_path_in_roots(roots: &[String], path: &str) -> Option<usize> {
+    let trees = TREES.lock();
+    let mut offset = 0usize;
+    for root in roots {
+        let Some(entry) = trees.get(root) else {
+            continue;
+        };
+        let snapshot_guard = entry.snapshot.lock();
+        let Some(snapshot) = snapshot_guard.as_ref() else {
+            continue;
+        };
+        if let Some(row) = snapshot.visible_index.get(path) {
+            return Some(offset + *row);
+        }
+        offset += snapshot.visible.len();
+    }
+    None
 }
 
 fn item_to_lua(lua: &Lua, node: &TreeNode) -> LuaResult<LuaTable> {
@@ -902,36 +1088,11 @@ fn item_to_lua(lua: &Lua, node: &TreeNode) -> LuaResult<LuaTable> {
 fn find_root_for_path(path: &str) -> Option<String> {
     let path = normalize_path(path);
     let trees = TREES.lock();
-    trees.keys()
+    trees
+        .keys()
         .filter(|root| path_belongs_to(&path, root))
         .max_by_key(|root| root.len())
         .cloned()
-}
-
-fn update_visible_for_root(root: &str) -> bool {
-    let trees = TREES.lock();
-    let Some(entry) = trees.get(root) else {
-        return false;
-    };
-    let expanded = entry.expanded.lock().clone();
-    let mut snapshot_guard = entry.snapshot.lock();
-    let Some(snapshot) = snapshot_guard.as_mut() else {
-        return false;
-    };
-    let mut changed = false;
-    for node in &mut snapshot.nodes {
-        if node.kind == NodeKind::Dir {
-            let next = node.abs_path == root || expanded.contains(&node.abs_path);
-            if node.expanded != next {
-                node.expanded = next;
-                changed = true;
-            }
-        }
-    }
-    if changed {
-        rebuild_visible(snapshot);
-    }
-    changed
 }
 
 pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
@@ -943,11 +1104,9 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let opts = parse_opts(opts)?;
             let mut keep = Vec::new();
             for root in roots.sequence_values::<String>() {
-                let root = normalize_path(&root?);
-                ensure_tree(&root, &opts)?;
-                keep.push(root);
+                keep.push(normalize_path(&root?));
             }
-            prune_roots(&keep);
+            ensure_roots(&keep, &opts)?;
             Ok(true)
         })?,
     )?;
@@ -958,26 +1117,40 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
     )?;
 
     module.set(
-        "get_visible_items",
-        lua.create_function(|lua, (roots, opts): (LuaTable, Option<LuaTable>)| {
-            let opts = parse_opts(opts)?;
+        "visible_count",
+        lua.create_function(|_, roots: LuaTable| {
             let mut root_list = Vec::new();
             for root in roots.sequence_values::<String>() {
-                let root = normalize_path(&root?);
-                ensure_tree(&root, &opts)?;
-                root_list.push(root);
+                root_list.push(normalize_path(&root?));
             }
-            let snapshots = collect_snapshots(&root_list);
-            let total: usize = snapshots.iter().map(|snapshot| snapshot.visible.len()).sum();
-            let out = lua.create_table_with_capacity(total, 0)?;
-            let mut idx = 1i64;
-            for snapshot in snapshots {
-                for node_id in snapshot.visible {
-                    out.raw_set(idx, item_to_lua(lua, &snapshot.nodes[node_id])?)?;
-                    idx += 1;
-                }
+            Ok(visible_count_for_roots(&root_list) as i64)
+        })?,
+    )?;
+
+    module.set(
+        "item_at",
+        lua.create_function(|lua, (roots, row): (LuaTable, i64)| {
+            let mut root_list = Vec::new();
+            for root in roots.sequence_values::<String>() {
+                root_list.push(normalize_path(&root?));
             }
-            Ok(out)
+            row_item_for_roots(lua, &root_list, row.max(0) as usize)
+        })?,
+    )?;
+
+    module.set(
+        "items_in_range",
+        lua.create_function(|lua, (roots, start_row, end_row): (LuaTable, i64, i64)| {
+            let mut root_list = Vec::new();
+            for root in roots.sequence_values::<String>() {
+                root_list.push(normalize_path(&root?));
+            }
+            items_for_range_in_roots(
+                lua,
+                &root_list,
+                start_row.max(0) as usize,
+                end_row.max(0) as usize,
+            )
         })?,
     )?;
 
@@ -988,12 +1161,14 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let Some(root) = find_root_for_path(&path) else {
                 return Ok(false);
             };
-            let is_new_expand = {
+            let (is_new_expand, needs_rebuild, changed_visible) = {
                 let trees = TREES.lock();
                 let Some(entry) = trees.get(&root) else {
                     return Ok(false);
                 };
                 let mut expanded = entry.expanded.lock();
+                let mut snapshot_guard = entry.snapshot.lock();
+                let snapshot = snapshot_guard.as_mut();
                 let is_expanded = expanded.contains(&path) || path == root;
                 let next = toggle.unwrap_or(!is_expanded);
                 if path != root {
@@ -1003,33 +1178,42 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                         expanded.remove(&path);
                     }
                 }
-                next && !is_expanded
+                let mut needs_rebuild = false;
+                let mut changed_visible = false;
+                if let Some(snapshot) = snapshot {
+                    if let Some(&node_id) = snapshot.path_to_node.get(&path) {
+                        if snapshot.nodes[node_id].kind == NodeKind::Dir {
+                            if snapshot.nodes[node_id].expanded != next {
+                                snapshot.nodes[node_id].expanded = next;
+                                changed_visible = if next {
+                                    expand_visible_subtree(snapshot, node_id)
+                                } else {
+                                    collapse_visible_subtree(snapshot, node_id)
+                                };
+                            }
+                            if next && !snapshot.nodes[node_id].explored {
+                                needs_rebuild = true;
+                            }
+                        }
+                    } else if next {
+                        needs_rebuild = true;
+                    }
+                } else if next {
+                    needs_rebuild = true;
+                }
+                (next && !is_expanded, needs_rebuild, changed_visible)
             };
 
-            if is_new_expand {
-                // If the directory has not been explored yet (lazy traversal),
-                // trigger an immediate rebuild so its children are loaded.
-                let needs_rebuild = {
-                    let trees = TREES.lock();
-                    trees.get(&root).map_or(false, |entry| {
-                        entry.snapshot.lock().as_ref().map_or(true, |s| {
-                            s.visible_index
-                                .get(&path)
-                                .map_or(true, |&row| !s.nodes[s.visible[row - 1]].explored)
-                        })
-                    })
-                };
-                if needs_rebuild {
-                    let trees = TREES.lock();
-                    if let Some(entry) = trees.get(&root) {
-                        entry.dirty.store(true, Ordering::Relaxed);
-                        *entry.last_event.lock() =
-                            Some(Instant::now() - REBUILD_DEBOUNCE - Duration::from_millis(1));
-                    }
+            if is_new_expand && needs_rebuild {
+                let trees = TREES.lock();
+                if let Some(entry) = trees.get(&root) {
+                    entry.dirty.store(true, Ordering::Relaxed);
+                    *entry.last_event.lock() =
+                        Some(Instant::now() - REBUILD_DEBOUNCE - Duration::from_millis(1));
                 }
             }
 
-            if update_visible_for_root(&root) {
+            if changed_visible || (is_new_expand && needs_rebuild) {
                 bump_generation();
             }
             Ok(true)
@@ -1043,18 +1227,33 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let Some(root) = find_root_for_path(&path) else {
                 return Ok(false);
             };
+            let mut changed_visible = false;
             {
                 let trees = TREES.lock();
                 let Some(entry) = trees.get(&root) else {
                     return Ok(false);
                 };
                 let mut expanded = entry.expanded.lock();
+                let mut snapshot_guard = entry.snapshot.lock();
                 let mut current = dirname(&path);
                 while let Some(dir) = current {
                     if !path_belongs_to(&dir, &root) {
                         break;
                     }
-                    expanded.insert(dir.clone());
+                    let inserted = expanded.insert(dir.clone());
+                    if inserted {
+                        if let Some(snapshot) = snapshot_guard.as_mut() {
+                            if let Some(&node_id) = snapshot.path_to_node.get(&dir) {
+                                if snapshot.nodes[node_id].kind == NodeKind::Dir
+                                    && !snapshot.nodes[node_id].expanded
+                                {
+                                    snapshot.nodes[node_id].expanded = true;
+                                    changed_visible = expand_visible_subtree(snapshot, node_id)
+                                        || changed_visible;
+                                }
+                            }
+                        }
+                    }
                     if dir == root {
                         break;
                     }
@@ -1067,7 +1266,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 *entry.last_event.lock() =
                     Some(Instant::now() - REBUILD_DEBOUNCE - Duration::from_millis(1));
             }
-            if update_visible_for_root(&root) {
+            if changed_visible {
                 bump_generation();
             }
             Ok(true)
@@ -1076,20 +1275,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 
     module.set(
         "get_row",
-        lua.create_function(|_, path: String| {
+        lua.create_function(|_, (roots, path): (LuaTable, String)| {
             let path = normalize_path(&path);
-            let Some(root) = find_root_for_path(&path) else {
-                return Ok(None::<i64>);
-            };
-            let trees = TREES.lock();
-            let Some(entry) = trees.get(&root) else {
-                return Ok(None::<i64>);
-            };
-            let snapshot_guard = entry.snapshot.lock();
-            let Some(snapshot) = snapshot_guard.as_ref() else {
-                return Ok(None::<i64>);
-            };
-            Ok(snapshot.visible_index.get(&path).copied().map(|idx| idx as i64))
+            let mut root_list = Vec::new();
+            for root in roots.sequence_values::<String>() {
+                root_list.push(normalize_path(&root?));
+            }
+            Ok(row_for_path_in_roots(&root_list, &path).map(|idx| idx as i64))
         })?,
     )?;
 

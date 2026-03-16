@@ -197,6 +197,8 @@ function StatusView:new()
   self.hovered_panel = ""
   self.hide_messages = false
   self.visible = true
+  self._separator_width = nil
+  self._separator2_width = nil
 
   self:register_docview_items()
   self:register_command_items()
@@ -642,6 +644,18 @@ local function text_width(font, _, text, _, x)
   return x + font:get_width(text)
 end
 
+local function styled_text_equals(a, b)
+  if a == b then return true end
+  if type(a) ~= "table" or type(b) ~= "table" then return false end
+  if #a ~= #b then return false end
+  for i = 1, #a do
+    if a[i] ~= b[i] then
+      return false
+    end
+  end
+  return true
+end
+
 
 ---Draws a table of styled text on the status bar starting on the left or right.
 ---@param items core.statusview.styledtext
@@ -696,13 +710,6 @@ function StatusView:draw_item_tooltip(item)
 end
 
 
-local function table_add(t1, t2)
-  for _, value in ipairs(t2) do
-    table.insert(t1, value)
-  end
-end
-
-
 ---Append a space item into the given items list.
 ---@param self core.statusview
 ---@param destination core.statusview.item[]
@@ -718,7 +725,15 @@ local function add_spacing(self, destination, separator, alignment, x)
     style.dim, separator
   }
   space.x = x
-  space.w = draw_items(self, space.cached_item, 0, 0, text_width)
+  if separator == self.separator then
+    self._separator_width = self._separator_width
+      or draw_items(self, space.cached_item, 0, 0, text_width)
+    space.w = self._separator_width
+  else
+    self._separator2_width = self._separator2_width
+      or draw_items(self, space.cached_item, 0, 0, text_width)
+    space.w = self._separator2_width
+  end
 
   table.insert(destination, space)
 
@@ -774,15 +789,11 @@ function StatusView:update_active_items()
 
   self.active_items = {}
 
-  ---@type core.statusview.item[]
-  local combined_items = {}
-  table_add(combined_items, self.items)
-
   local lfirst, rfirst = true, true
 
   -- calculate left and right width
-  for _, item in ipairs(combined_items) do
-    item.cached_item = {}
+  for _, item in ipairs(self.items) do
+    local previous_cached_item = item.cached_item
     if item.visible and item:predicate() then
       local styled_text = type(item.get_item) == "function"
         and item.get_item(item) or item.get_item
@@ -804,10 +815,13 @@ function StatusView:update_active_items()
           else
             lfirst = false
           end
-          item.w = item.on_draw and
-            item.on_draw(lx, self.position.y, self.size.y, hovered, true)
-            or
-            draw_items(self, styled_text, 0, 0, text_width)
+          if item.on_draw then
+            item.w = item.on_draw(lx, self.position.y, self.size.y, hovered, true)
+          elseif styled_text_equals(previous_cached_item, styled_text) and item.cached_width then
+            item.w = item.cached_width
+          else
+            item.w = draw_items(self, styled_text, 0, 0, text_width)
+          end
           item.x = lx
           lw = lw + item.w
           lx = lx + item.w
@@ -821,21 +835,29 @@ function StatusView:update_active_items()
           else
             rfirst = false
           end
-          item.w = item.on_draw and
-            item.on_draw(rx, self.position.y, self.size.y, hovered, true)
-            or
-            draw_items(self, styled_text, 0, 0, text_width)
+          if item.on_draw then
+            item.w = item.on_draw(rx, self.position.y, self.size.y, hovered, true)
+          elseif styled_text_equals(previous_cached_item, styled_text) and item.cached_width then
+            item.w = item.cached_width
+          else
+            item.w = draw_items(self, styled_text, 0, 0, text_width)
+          end
           item.x = rx
           rw = rw + item.w
           rx = rx + item.w
         end
         item.cached_item = styled_text
+        item.cached_width = item.w
         table.insert(self.active_items, item)
       else
         item.active = false
+        item.cached_item = {}
+        item.cached_width = 0
       end
     else
       item.active = false
+      item.cached_item = {}
+      item.cached_width = 0
     end
   end
 
@@ -890,6 +912,7 @@ function StatusView:update_active_items()
       -- re-calculate x position now that we have the total width
       item.x = item.x - rw - (style.padding.x * 2)
     end
+    item.visible_x, item.visible_w = self:get_item_visible_area(item)
   end
 end
 
@@ -938,6 +961,9 @@ end
 ---@return number x
 ---@return number w
 function StatusView:get_item_visible_area(item)
+  if item.visible_x and item.visible_w and not item._recompute_visible_area then
+    return item.visible_x, item.visible_w
+  end
   local item_ox = item.alignment == StatusView.Item.LEFT and
     self.left_xoffset or self.right_xoffset
 
@@ -1018,7 +1044,7 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
     return
   end
 
-  for _, item in ipairs(self.items) do
+  for _, item in ipairs(self.active_items) do
     if
       item.visible and item.active
       and

@@ -426,11 +426,23 @@ mod tests {
 
         let names: Vec<_> = files
             .iter()
-            .map(|f| std::path::Path::new(f).file_name().unwrap().to_str().unwrap())
+            .map(|f| {
+                std::path::Path::new(f)
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            })
             .collect();
         assert!(names.contains(&"root.txt"), "root.txt should be included");
         assert!(names.contains(&"main.kt"), "main.kt should be included");
-        assert!(!names.contains(&"artifact.class"), "build/ should be excluded");
-        assert!(!names.contains(&"module.pyc"), "__pycache__/ should be excluded");
+        assert!(
+            !names.contains(&"artifact.class"),
+            "build/ should be excluded"
+        );
+        assert!(
+            !names.contains(&"module.pyc"),
+            "__pycache__/ should be excluded"
+        );
     }
 }

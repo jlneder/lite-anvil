@@ -8,12 +8,15 @@ local style = require "core.style"
 local View = require "core.view"
 local native_project_search = nil
 local native_project_fs = nil
+local native_project_model = nil
 
 do
   local ok, mod = pcall(require, "project_search")
   if ok then native_project_search = mod end
   ok, mod = pcall(require, "project_fs")
   if ok then native_project_fs = mod end
+  ok, mod = pcall(require, "project_model")
+  if ok then native_project_model = mod end
 end
 
 ---@class plugins.projectsearch.resultsview : core.view
@@ -138,7 +141,7 @@ local function collect_roots(path)
 end
 
 local function collect_native_files(path, path_glob)
-  if not native_project_search then
+  if not native_project_search and not native_project_model then
     return nil
   end
   if path then
@@ -148,13 +151,31 @@ local function collect_native_files(path, path_glob)
     end
   end
   local roots = collect_roots(path)
-  local files = native_project_search.collect_files(roots, {
-    show_hidden = false,
-    max_size_bytes = config.file_size_limit * 1e6,
-    path_glob = path_glob,
-    max_files = config.project_scan.max_files,
-    exclude_dirs = config.project_scan.exclude_dirs,
-  })
+  local files
+  if native_project_model then
+    files = native_project_model.get_all_files(roots, {
+      max_size_bytes = config.file_size_limit * 1e6,
+      max_files = config.project_scan.max_files,
+      exclude_dirs = config.project_scan.exclude_dirs,
+    })
+    if path_glob and path_glob ~= "" then
+      local filtered = {}
+      for _, file in ipairs(files) do
+        if path_matches_glob(file, path_glob) then
+          filtered[#filtered + 1] = file
+        end
+      end
+      files = filtered
+    end
+  else
+    files = native_project_search.collect_files(roots, {
+      show_hidden = false,
+      max_size_bytes = config.file_size_limit * 1e6,
+      path_glob = path_glob,
+      max_files = config.project_scan.max_files,
+      exclude_dirs = config.project_scan.exclude_dirs,
+    })
+  end
   if path and (not system.get_file_info(path) or system.get_file_info(path).type ~= "dir") then
     local filtered = {}
     for _, file in ipairs(files) do

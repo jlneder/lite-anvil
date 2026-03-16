@@ -1334,31 +1334,37 @@ local run_threads = coroutine.wrap(function()
     local max_time = 1 / config.fps - 0.004
     local minimal_time_to_wake = math.huge
 
-    local threads = {}
+    local thread_keys = {}
+    local key_count = 0
     -- We modify core.threads while iterating, both by removing dead threads,
     -- and by potentially adding more threads while we yielded early,
-    -- so we need to extract the threads list and iterate over that instead.
-    for k, thread in pairs(core.threads) do
-      threads[k] = thread
+    -- so we need to extract the thread keys and iterate over that instead.
+    for k in pairs(core.threads) do
+      key_count = key_count + 1
+      thread_keys[key_count] = k
     end
 
-    for k, thread in pairs(threads) do
+    for i = 1, key_count do
+      local k = thread_keys[i]
+      thread_keys[i] = nil
+      local thread = core.threads[k]
+      local now = system.get_time()
       -- Run thread if it wasn't deleted externally and it's time to resume it
-      if core.threads[k] and thread.wake < system.get_time() then
+      if thread and thread.wake < now then
         local _, wait = assert(coroutine.resume(thread.cr))
         if coroutine.status(thread.cr) == "dead" then
           core.threads[k] = nil
         else
           wait = wait or (1/30)
-          thread.wake = system.get_time() + wait
+          thread.wake = now + wait
           minimal_time_to_wake = math.min(minimal_time_to_wake, wait)
         end
-      else
-        minimal_time_to_wake =  math.min(minimal_time_to_wake, thread.wake - system.get_time())
+      elseif thread then
+        minimal_time_to_wake =  math.min(minimal_time_to_wake, thread.wake - now)
       end
 
       -- stop running threads if we're about to hit the end of frame
-      if system.get_time() - core.frame_start > max_time then
+      if now - core.frame_start > max_time then
         coroutine.yield(0, false)
       end
     end

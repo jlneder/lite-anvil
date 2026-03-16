@@ -220,8 +220,7 @@ fn ensure_project(
             std::thread::spawn(move || {
                 // Step 1: walk the project tree and populate the file list.
                 // The UI can show results as soon as this completes.
-                let new_files =
-                    build_files(&root_clone, max_size_bytes, max_files, &exclude_dirs);
+                let new_files = build_files(&root_clone, max_size_bytes, max_files, &exclude_dirs);
                 *files.lock() = new_files;
                 rebuilding.store(false, Ordering::Relaxed);
                 #[cfg(feature = "sdl")]

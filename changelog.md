@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.13.8] - 2026-03-16 — UI optimizations.
+
+* Move sidebar/tree hot paths fully native, fetch only visible row windows, and cut repeated tab, toolbar, titlebar, tooltip, statusbar, and context-menu layout work on the UI thread.
+* Remove remaining main-thread blockers from workspace-scale features by dropping synchronous native Git refreshes from the refresh loop, moving native replace work off-thread, and preferring the async project file cache for search/replace file collection.
+
 ## [0.13.7] - 2026-03-16 — Treeview lazy loading.
 
 * Make the native tree model lazy so treeview no longer walks whole projects before showing results.
