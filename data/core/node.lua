@@ -325,9 +325,10 @@ end
 
 
 local function close_button_location(x, w)
-  local cw = style.icon_font:get_width("C")
-  local pad = style.padding.x / 2
-  return x + w - cw - pad, cw, pad
+  local icon_w = style.icon_font:get_width("C")
+  local hit_w = math.max(icon_w + style.padding.x, style.font:get_height())
+  local pad = math.max(style.padding.x / 2, math.floor((hit_w - icon_w) / 2))
+  return x + w - hit_w, icon_w, pad, hit_w
 end
 
 
@@ -363,8 +364,8 @@ function Node:tab_hovered_update(px, py)
   self.hovered_scroll_button = 0
   if tab_index then
     local x, y, w, h = self:get_tab_rect(tab_index)
-    local cx, cw = close_button_location(x, w)
-    if px >= cx and px < cx + cw and py >= y and py < y + h and config.tab_close_button then
+    local cx, cw, _, hit_w = close_button_location(x, w)
+    if px >= cx and px < cx + hit_w and py >= y and py < y + h and config.tab_close_button then
       self.hovered_close = tab_index
     end
   elseif #self.views > self:get_visible_tabs_number() then
@@ -632,7 +633,7 @@ function Node:draw_tab_borders(view, is_active, is_hovered, x, y, w, h, standalo
   -- Tabs deviders
   local ds = style.divider_size
   local color = style.dim
-  local padding_y = style.padding.y
+  local padding_y = math.max(2, math.floor(style.padding.y * 0.75))
   renderer.draw_rect(x + w, y + padding_y, ds, h - padding_y*2, style.dim)
   if standalone then
     renderer.draw_rect(x-1, y-1, w+2, h+2, style.background2)
@@ -652,11 +653,16 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
   local _, padding_y, margin_y = get_tab_y_sizes()
   x, y, w, h = self:draw_tab_borders(view, is_active, is_hovered, x, y + margin_y, w, h - margin_y, standalone)
   -- Close button
-  local cx, cw, cpad = close_button_location(x, w)
+  local cx, cw, cpad, hit_w = close_button_location(x, w)
   local show_close_button = ((is_active or is_hovered) and not standalone and config.tab_close_button)
   if show_close_button then
     local close_style = is_close_hovered and style.text or style.dim
-    common.draw_text(style.icon_font, close_style, "C", nil, cx, y, cw, h)
+    if is_close_hovered then
+      local hover_bg = { table.unpack(style.line_highlight) }
+      hover_bg[4] = 150
+      renderer.draw_rect(cx, y + padding_y / 2, hit_w, h - padding_y, hover_bg)
+    end
+    common.draw_text(style.icon_font, close_style, "C", nil, cx + cpad, y, cw, h)
   end
   -- Title
   x = x + cpad

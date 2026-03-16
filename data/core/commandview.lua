@@ -67,6 +67,8 @@ function CommandView:new()
   self.font = "font"
   self.size.y = 0
   self.label = ""
+  self.suggestion_cache = {}
+  self.suggestion_max_width = 0
 end
 
 
@@ -228,6 +230,8 @@ function CommandView:exit(submitted, inexplicit)
   if not submitted then cancel(not inexplicit) end
   self.save_suggestion = nil
   self.last_text = ""
+  self.suggestion_cache = {}
+  self.suggestion_max_width = 0
 end
 
 
@@ -245,6 +249,26 @@ function CommandView:get_suggestion_line_height()
   return self:get_font():get_height() + style.padding.y
 end
 
+function CommandView:on_scale_change()
+  self.suggestion_cache = {}
+  self.suggestion_max_width = 0
+end
+
+function CommandView:get_cached_suggestion(item)
+  local key = (item.text or "") .. "\0" .. (item.info or "")
+  local cached = self.suggestion_cache[key]
+  if cached and cached.font == self:get_font() then
+    return cached
+  end
+  cached = {
+    font = self:get_font(),
+    text_width = self:get_font():get_width(item.text or ""),
+    info_width = item.info and self:get_font():get_width(item.info) or 0,
+  }
+  self.suggestion_cache[key] = cached
+  return cached
+end
+
 
 function CommandView:update_suggestions()
   local text = self:get_text()
@@ -254,6 +278,8 @@ function CommandView:update_suggestions()
     if type(item) == "string" then
       item = { text = item }
     end
+    local metrics = self:get_cached_suggestion(item)
+    item.cached_width = metrics.text_width + (item.info and (style.padding.x * 2 + metrics.info_width) or 0)
     res[i] = item
   end
   if self.suggestions and self.last_change == "suggestion" then
@@ -272,6 +298,10 @@ function CommandView:update_suggestions()
     self.suggestions_offset = 1
   end
   self.suggestions = res
+  self.suggestion_max_width = 0
+  for _, item in ipairs(res) do
+    self.suggestion_max_width = math.max(self.suggestion_max_width, item.cached_width or 0)
+  end
 end
 
 
@@ -351,7 +381,8 @@ local function draw_suggestions_box(self)
   local dh = style.divider_size
   local x, _ = self:get_line_screen_position()
   local h = math.ceil(self.suggestions_height)
-  local rx, ry, rw, rh = self.position.x, self.position.y - h - dh, self.size.x, h
+  local rw = math.min(self.size.x, math.max(self.gutter_width + style.padding.x * 2 + self.suggestion_max_width, self.size.x * 0.45))
+  local rx, ry, rh = self.position.x, self.position.y - h - dh, h
 
   core.push_clip_rect(rx, ry, rw, rh)
   -- draw suggestions background
@@ -369,10 +400,11 @@ local function draw_suggestions_box(self)
     local item = self.suggestions[i]
     local color = (i == self.suggestion_idx) and style.accent or style.text
     local y = self.position.y - (i - first + 1) * lh - dh
-    common.draw_text(self:get_font(), color, item.text, nil, x, y, 0, lh)
+    local text_w = math.max(0, rw - x + rx - style.padding.x)
+    common.draw_text(self:get_font(), color, item.text, nil, x, y, text_w, lh)
 
     if item.info then
-      local w = self.size.x - x - style.padding.x
+      local w = rw - (x - rx) - style.padding.x
       common.draw_text(self:get_font(), style.dim, item.info, "right", x, y, w, lh)
     end
   end

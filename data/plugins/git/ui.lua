@@ -6,6 +6,7 @@ local git = require "..status"
 
 local DiffView = View:extend()
 local StatusView = View:extend()
+local section_inset = 10
 
 function DiffView:__tostring() return "GitDiffView" end
 function StatusView:__tostring() return "GitStatusView" end
@@ -98,11 +99,11 @@ function StatusView:get_name()
 end
 
 function StatusView:get_line_height()
-  return style.font:get_height() + style.padding.y
+  return style.font:get_height() + style.padding.y + 2
 end
 
 function StatusView:get_header_height()
-  return style.font:get_height() + style.padding.y * 3
+  return style.font:get_height() * 2 + style.padding.y * 3
 end
 
 function StatusView:get_scrollable_size()
@@ -151,6 +152,7 @@ function StatusView:draw()
   self:draw_background(style.background)
   local repo = self:get_repo()
   local header = "No repository"
+  local detail = ""
   if repo then
     if repo.error and repo.error ~= "" then
       header = "Git error: " .. repo.error
@@ -159,35 +161,45 @@ function StatusView:draw()
       if repo.ahead > 0 then summary[#summary + 1] = "ahead " .. repo.ahead end
       if repo.behind > 0 then summary[#summary + 1] = "behind " .. repo.behind end
       local branch = repo.branch ~= "" and repo.branch or (repo.refreshing and "Refreshing Git status..." or "(no branch)")
-      header = string.format("%s%s%s",
-        branch,
-        #summary > 0 and (" [" .. table.concat(summary, ", ") .. "]") or "",
-        repo.refreshing and repo.branch ~= "" and "  refreshing..." or "")
+      header = branch
+      detail = table.concat(summary, "  ")
+      if repo.refreshing and repo.branch ~= "" then
+        detail = detail ~= "" and (detail .. "  refreshing…") or "refreshing…"
+      end
     end
   end
 
   local ox, oy = self.position.x, self.position.y
   local header_h = self:get_header_height()
   renderer.draw_rect(ox, oy, self.size.x, header_h, style.background)
-  renderer.draw_text(style.font, header, ox + style.padding.x, oy + style.padding.y, style.text)
+  renderer.draw_text(style.font, header, ox + section_inset, oy + style.padding.y, style.text)
+  if detail ~= "" then
+    renderer.draw_text(style.font, detail, ox + section_inset, oy + style.padding.y + style.font:get_height() + 2, style.dim)
+  end
   renderer.draw_rect(
-    ox + style.padding.x,
+    ox + section_inset,
     oy + header_h - style.padding.y,
-    self.size.x - style.padding.x * 2,
+    self.size.x - section_inset * 2,
     style.divider_size,
     style.divider
   )
 
   local items = self:get_items()
   if repo and repo.error and repo.error ~= "" then
-    renderer.draw_text(style.font, repo.error, ox + style.padding.x, oy + header_h + style.padding.y, style.error or style.text)
+    renderer.draw_text(style.font, repo.error, ox + section_inset, oy + header_h + style.padding.y, style.error or style.text)
   elseif #items == 0 and repo and not repo.refreshing then
-    renderer.draw_text(style.font, "Working tree clean", ox + style.padding.x, oy + header_h + style.padding.y, style.dim)
+    renderer.draw_text(style.font, "Working tree clean", ox + section_inset, oy + header_h + style.padding.y, style.dim)
   end
 
   for i, item, x, y, w, h in self:each_visible_item() do
     if i == self.selected_idx then
-      renderer.draw_rect(x, y, w, h, style.line_highlight)
+      local highlight = { table.unpack(style.line_highlight) }
+      highlight[4] = math.max(highlight[4] or 0, 190)
+      renderer.draw_rect(x, y, w, h, highlight)
+    elseif i % 2 == 0 then
+      local stripe = { table.unpack(style.background2) }
+      stripe[4] = 70
+      renderer.draw_rect(x, y, w, h, stripe)
     end
     local code_color = style.dim
     if item.kind == "staged" then
@@ -200,9 +212,9 @@ function StatusView:draw()
       code_color = style.error or { 220, 120, 120, 255 }
     end
     local rel = common.home_encode(item.rel)
-    local dx = x + style.padding.x
-    dx = common.draw_text(style.code_font, code_color, item.code, "left", dx, y, w, h)
-    common.draw_text(style.font, style.text, "  " .. rel, "left", dx, y, w, h)
+    local dx = x + section_inset
+    common.draw_text(style.code_font, code_color, item.code, "center", dx, y, style.font:get_height() * 1.4, h)
+    common.draw_text(style.font, style.text, rel, "left", dx + style.font:get_height() * 1.7, y, math.max(0, w - dx - section_inset), h)
   end
   self:draw_scrollbar()
 end

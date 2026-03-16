@@ -35,6 +35,10 @@ local function title_view_height()
   return style.font:get_height() + style.padding.y * 2
 end
 
+local function title_separator_inset()
+  return math.max(10, style.padding.x - 2)
+end
+
 function TitleView:new()
   TitleView.super.new(self)
   self.visible = true
@@ -51,7 +55,8 @@ function TitleView:get_control_metrics()
     font = style.icon_font,
     width = icon_w,
     height = style.icon_font:get_height(),
-    spacing = icon_w,
+    spacing = math.max(style.padding.x * 0.75, math.floor(icon_w * 0.7)),
+    hit_width = math.max(icon_w + style.padding.x, style.font:get_height()),
   }
   self._control_metrics = metrics
   return metrics
@@ -61,10 +66,8 @@ function TitleView:configure_hit_test(borderless)
   if borderless then
     local title_height = title_view_height()
     local metrics = self:get_control_metrics()
-    local icon_w = metrics.width
-    local icon_spacing = metrics.spacing
-    local controls_width = (icon_w + icon_spacing) * #title_commands + icon_spacing
-    system.set_window_hit_test(core.window, title_height, controls_width, icon_spacing)
+    local controls_width = metrics.hit_width * #title_commands + metrics.spacing
+    system.set_window_hit_test(core.window, title_height, controls_width, metrics.spacing)
     -- core.hit_test_title_height = title_height
   else
     system.set_window_hit_test(core.window)
@@ -87,14 +90,19 @@ function TitleView:draw_window_title()
   local h = style.font:get_height()
   local ox, oy = self:get_content_offset()
   local color = style.text
-  local x, y = ox + style.padding.x, oy + style.padding.y
+  local metrics = self:get_control_metrics()
+  local controls_width = metrics.hit_width * #title_commands + metrics.spacing
+  local x, y = ox + title_separator_inset(), oy + style.padding.y
   common.draw_text(style.icon_font, icon_colors.bg, "5", nil, x, y, 0, h)
   common.draw_text(style.icon_font, icon_colors.color6, "6", nil, x, y, 0, h)
   common.draw_text(style.icon_font, icon_colors.color7, "7", nil, x, y, 0, h)
   common.draw_text(style.icon_font, icon_colors.color8, "8", nil, x, y, 0, h)
   x = common.draw_text(style.icon_font, icon_colors.color9, "9 ", nil, x, y, 0, h)
   local title = core.compose_window_title(core.window_title)
-  common.draw_text(style.font, color, title, nil, x, y, 0, h)
+  local title_width = math.max(0, self.size.x - controls_width - x - title_separator_inset())
+  core.push_clip_rect(x, self.position.y, title_width, self.size.y)
+  common.draw_text(style.font, color, title, nil, x, y, title_width, h)
+  core.pop_clip_rect()
 end
 
 function TitleView:each_control_item()
@@ -102,14 +110,15 @@ function TitleView:each_control_item()
   local icon_h, icon_w = metrics.height, metrics.width
   local icon_spacing = metrics.spacing
   local ox, oy = self:get_content_offset()
-  ox = ox + self.size.x
+  ox = ox + self.size.x - title_separator_inset()
   local i, n = 0, #title_commands
   local iter = function()
     i = i + 1
     if i <= n then
-      local dx = - (icon_w + icon_spacing) * (n - i + 1)
-      local dy = style.padding.y
-      return title_commands[i], ox + dx, oy + dy, icon_w, icon_h
+      local dx = - (metrics.hit_width * (n - i + 1))
+      local x = ox + dx
+      local y = oy + style.padding.y
+      return title_commands[i], x, y, metrics.hit_width, icon_h, metrics
     end
   end
   return iter
@@ -117,9 +126,14 @@ end
 
 
 function TitleView:draw_window_controls()
-  for item, x, y, w, h in self:each_control_item() do
+  for item, x, y, w, h, metrics in self:each_control_item() do
     local color = item == self.hovered_item and style.text or style.dim
-    common.draw_text(style.icon_font, color, item.symbol, nil, x, y, 0, h)
+    if item == self.hovered_item then
+      local hover_bg = { table.unpack(style.line_highlight) }
+      hover_bg[4] = 140
+      renderer.draw_rect(x, self.position.y, w, self.size.y, hover_bg)
+    end
+    common.draw_text(style.icon_font, color, item.symbol, "center", x, y, w, h)
   end
 end
 
@@ -160,6 +174,13 @@ function TitleView:draw()
   self:draw_background(style.background2)
   self:draw_window_title()
   self:draw_window_controls()
+  renderer.draw_rect(
+    self.position.x + title_separator_inset(),
+    self.position.y + self.size.y - style.divider_size,
+    math.max(0, self.size.x - title_separator_inset() * 2),
+    style.divider_size,
+    style.divider
+  )
 end
 
 return TitleView

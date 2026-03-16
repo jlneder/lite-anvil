@@ -35,6 +35,7 @@ local tooltip_border = 1
 local tooltip_delay = 0.5
 local tooltip_alpha = 255
 local tooltip_alpha_rate = 1
+local separator_inset = 10
 
 
 local function replace_alpha(color, alpha)
@@ -49,15 +50,6 @@ local function tree_roots()
     roots[i] = project.path
   end
   return roots
-end
-
-
-local function project_by_root(root)
-  for _, project in ipairs(core.projects) do
-    if project.path == root then
-      return project
-    end
-  end
 end
 
 
@@ -96,6 +88,7 @@ function TreeView:new()
   self.hovered_path = nil
 
   self.item_icon_width = 0
+  self.item_chevron_width = 0
   self.item_text_spacing = 0
   self.items_dirty = true
   self.last_project_count = 0
@@ -106,15 +99,18 @@ function TreeView:new()
   self.project_roots = {}
   self.range_cache = { start_row = 0, end_row = 0, items = {} }
   self.text_width_cache = {}
+  self.label_cache = {}
+  self.item_font_height = 0
+  self.icon_font_height = 0
 end
 
 
 function TreeView:set_target_size(axis, value)
   if axis == "x" then
-    self.target_size = value
-    config.plugins.treeview.size = value
+    self.target_size = math.max(140 * SCALE, common.round(value))
+    config.plugins.treeview.size = self.target_size
     if core.session then
-      core.session.treeview_size = value
+      core.session.treeview_size = self.target_size
     end
     return true
   end
@@ -292,19 +288,52 @@ end
 
 
 function TreeView:get_text_bounding_box(item, x, y, w, h)
-  local icon_width = self.item_icon_width
-  local xoffset = item.depth * style.padding.x + style.padding.x + icon_width
+  local xoffset = item.depth * style.padding.x
+    + style.padding.x
+    + self.item_chevron_width
+    + self.item_icon_width
+    + self.item_text_spacing
   x = x + xoffset
-  local cached_width = self.text_width_cache[item.abs_filename]
-  if not cached_width or cached_width.name ~= item.name then
-    cached_width = {
-      name = item.name,
-      width = style.font:get_width(item.name),
-    }
-    self.text_width_cache[item.abs_filename] = cached_width
-  end
+  local cached_width = self:get_label_cache(item.abs_filename, item.name, self.size.x).width_cache
   w = cached_width.width + 2 * style.padding.x
   return x, y, w, h
+end
+
+function TreeView:get_label_cache(path, text, avail_width)
+  local width_key = math.max(0, math.floor(avail_width or 0))
+  local cached = self.label_cache[path]
+  if cached and cached.text == text and cached.width_key == width_key then
+    return cached
+  end
+  local full_width = style.font:get_width(text)
+  local display_text = text
+  if full_width > width_key and width_key > 0 then
+    local dots = "…"
+    local dots_width = style.font:get_width(dots)
+    local low, high = 0, #text
+    while low < high do
+      local mid = math.floor((low + high + 1) / 2)
+      local candidate = text:sub(1, mid) .. dots
+      if style.font:get_width(candidate) <= math.max(0, width_key - style.padding.x) then
+        low = mid
+      else
+        high = mid - 1
+      end
+    end
+    display_text = low > 0 and (text:sub(1, low) .. dots) or dots
+  end
+  cached = {
+    text = text,
+    width_key = width_key,
+    display_text = display_text,
+    width_cache = {
+      name = text,
+      width = full_width,
+    },
+  }
+  self.label_cache[path] = cached
+  self.text_width_cache[path] = cached.width_cache
+  return cached
 end
 
 
@@ -365,7 +394,7 @@ function TreeView:update()
     self.size.x = dest
     self.init_size = false
   else
-    self:move_towards(self.size, "x", dest, nil, "treeview")
+    self:move_towards(self.size, "x", dest, 0.35, "treeview")
   end
 
   if self.size.x == 0 or self.size.y == 0 or not self.visible then return end
@@ -412,9 +441,24 @@ function TreeView:update()
 end
 
 function TreeView:on_scale_change()
-  self.item_icon_width = style.icon_font:get_width("D")
-  self.item_text_spacing = style.icon_font:get_width("f") / 2
+  self.item_icon_width = math.max(
+    style.icon_font:get_width("D"),
+    style.icon_font:get_width("d"),
+    style.icon_font:get_width("f")
+  )
+  self.item_chevron_width = math.max(
+    style.icon_font:get_width("+"),
+    style.icon_font:get_width("-"),
+    style.padding.x
+  )
+  self.item_text_spacing = math.max(
+    style.padding.x,
+    math.ceil(self.item_icon_width * 0.4)
+  )
+  self.item_font_height = style.font:get_height()
+  self.icon_font_height = style.icon_font:get_height()
   self.text_width_cache = {}
+  self.label_cache = {}
 end
 
 
@@ -429,11 +473,23 @@ function TreeView:draw_tooltip()
   local text = common.home_encode(hovered.abs_filename)
   local w, h = style.font:get_width(text), style.font:get_height(text)
 
+  local _, _, row_y = self:resolve_path(hovered.abs_filename)
+  row_y = row_y or self.tooltip.y
+  local row_h = self:get_item_height()
   local x, y = self.tooltip.x + tooltip_offset, self.tooltip.y + tooltip_offset
   w, h = w + style.padding.x, h + style.padding.y
 
-  if x + w > core.root_view.root_node.size.x then -- check if we can span right
-    x = x - w -- span left instead
+  if x + w > core.root_view.root_node.size.x - style.padding.x then
+    x = self.tooltip.x - w - tooltip_offset
+  end
+  if x < style.padding.x then
+    x = style.padding.x
+  end
+  if y >= row_y and y <= row_y + row_h then
+    y = row_y - h - tooltip_offset
+  end
+  if y < style.padding.x then
+    y = math.min(core.root_view.root_node.size.y - h - style.padding.y, row_y + row_h + tooltip_offset)
   end
 
   local bx, by = x - tooltip_border, y - tooltip_border
@@ -460,7 +516,9 @@ function TreeView:get_item_icon(item, active, hovered)
 end
 
 function TreeView:get_item_text(item, active, hovered)
-  local text = item.name
+  local available_width = self.size.x
+    - (item.depth * style.padding.x + style.padding.x * 2 + self.item_chevron_width + self.item_icon_width + self.item_text_spacing)
+  local text = self:get_label_cache(item.abs_filename, item.name, available_width).display_text
   local font = style.font
   local color = style.text
   if active or hovered then
@@ -480,14 +538,15 @@ end
 
 function TreeView:draw_item_icon(item, active, hovered, x, y, w, h)
   local icon_char, icon_font, icon_color = self:get_item_icon(item, active, hovered)
-  common.draw_text(icon_font, icon_color, icon_char, nil, x, y, 0, h)
+  local iy = y + common.round((h - self.icon_font_height) / 2)
+  renderer.draw_text(icon_font, icon_char, x, iy, icon_color)
   return self.item_icon_width + self.item_text_spacing
 end
 
 
 function TreeView:draw_item_body(item, active, hovered, x, y, w, h)
-    x = x + self:draw_item_icon(item, active, hovered, x, y, w, h)
-    self:draw_item_text(item, active, hovered, x, y, w, h)
+  x = x + self:draw_item_icon(item, active, hovered, x, y, w, h)
+  self:draw_item_text(item, active, hovered, x, y, w, h)
 end
 
 
@@ -495,19 +554,22 @@ function TreeView:draw_item_chevron(item, active, hovered, x, y, w, h)
   if item.type == "dir" then
     local chevron_icon = item.expanded and "-" or "+"
     local chevron_color = hovered and style.accent or style.text
-    common.draw_text(style.icon_font, chevron_color, chevron_icon, nil, x, y, 0, h)
+    local iy = y + common.round((h - self.icon_font_height) / 2)
+    renderer.draw_text(style.icon_font, chevron_icon, x, iy, chevron_color)
   end
-  return style.padding.x
+  return self.item_chevron_width
 end
 
 
 function TreeView:draw_item_background(item, active, hovered, x, y, w, h)
   if active then
-    renderer.draw_rect(x, y, w, h, style.line_highlight)
+    local active_color = { table.unpack(style.line_highlight) }
+    active_color[4] = math.max(active_color[4] or 0, 210)
+    renderer.draw_rect(x, y, w, h, active_color)
   end
   if hovered and not active then
     local hover_color = { table.unpack(style.line_highlight) }
-    hover_color[4] = 160
+    hover_color[4] = 110
     renderer.draw_rect(x, y, w, h, hover_color)
   end
 end
@@ -526,6 +588,13 @@ end
 function TreeView:draw()
   if not self.visible then return end
   self:draw_background(style.background2)
+  renderer.draw_rect(
+    self.position.x + separator_inset,
+    self.position.y,
+    math.max(0, self.size.x - separator_inset * 2),
+    style.divider_size,
+    style.divider
+  )
 
   if #core.projects ~= self.last_project_count then
     self.items_dirty = true

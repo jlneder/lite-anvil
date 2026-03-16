@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.13.9] - 2026-03-16 — UI polish.
+
+* Fix cross-platform tree spacing and truncation so icons, chevrons, labels, tooltips, and resize behavior stay clean on macOS and Linux.
+* Polish tabs, titlebar, command palette, Git status, and panel separators while keeping the recent large-workspace Git/search/replace work off the main thread.
+
 ## [0.13.8] - 2026-03-16 — UI optimizations.
 
 * Move sidebar/tree hot paths fully native, fetch only visible row windows, and cut repeated tab, toolbar, titlebar, tooltip, statusbar, and context-menu layout work on the UI thread.
