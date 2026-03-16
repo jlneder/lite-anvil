@@ -24,6 +24,8 @@ struct TreeEntry {
     dirty: Arc<AtomicBool>,
     rebuilding: Arc<AtomicBool>,
     last_event: Arc<Mutex<Option<Instant>>>,
+    /// Held solely to keep the watcher alive via RAII; never explicitly read.
+    #[allow(dead_code)]
     _watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     expanded: Arc<Mutex<HashSet<String>>>,
     options: TreeOptionsKey,
@@ -86,6 +88,9 @@ struct TreeNode {
     depth: usize,
     children: Vec<usize>,
     expanded: bool,
+    /// True once this directory's immediate children have been read from disk.
+    /// False for collapsed dirs that were not traversed in the last build.
+    explored: bool,
     project_root: String,
 }
 
@@ -609,6 +614,7 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
         depth: 0,
         children: Vec::new(),
         expanded: true,
+        explored: false,
         project_root: root.clone(),
     }];
     let mut stack = vec![(0usize, PathBuf::from(&root))];
@@ -641,15 +647,20 @@ fn build_snapshot(root: &str, opts: &TreeOptions, expanded: &HashSet<String>) ->
                 depth,
                 children: Vec::new(),
                 expanded: is_expanded,
+                explored: false,
                 project_root: root.clone(),
             });
             children.push(child_id);
-            if entry.kind == NodeKind::Dir {
+            // Only recurse into directories that are currently expanded.
+            // Collapsed dirs are represented as leaf nodes until expanded.
+            if entry.kind == NodeKind::Dir && is_expanded {
                 stack.push((child_id, PathBuf::from(&child_path)));
             }
         }
         children.reverse();
         nodes[parent_id].children = children;
+        // Mark this directory as having its children loaded.
+        nodes[parent_id].explored = true;
     }
 
     let mut snapshot = ProjectSnapshot {
@@ -977,22 +988,47 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let Some(root) = find_root_for_path(&path) else {
                 return Ok(false);
             };
-            let trees = TREES.lock();
-            let Some(entry) = trees.get(&root) else {
-                return Ok(false);
+            let is_new_expand = {
+                let trees = TREES.lock();
+                let Some(entry) = trees.get(&root) else {
+                    return Ok(false);
+                };
+                let mut expanded = entry.expanded.lock();
+                let is_expanded = expanded.contains(&path) || path == root;
+                let next = toggle.unwrap_or(!is_expanded);
+                if path != root {
+                    if next {
+                        expanded.insert(path.clone());
+                    } else {
+                        expanded.remove(&path);
+                    }
+                }
+                next && !is_expanded
             };
-            let mut expanded = entry.expanded.lock();
-            let is_expanded = expanded.contains(&path) || path == root;
-            let next = toggle.unwrap_or(!is_expanded);
-            if path != root {
-                if next {
-                    expanded.insert(path.clone());
-                } else {
-                    expanded.remove(&path);
+
+            if is_new_expand {
+                // If the directory has not been explored yet (lazy traversal),
+                // trigger an immediate rebuild so its children are loaded.
+                let needs_rebuild = {
+                    let trees = TREES.lock();
+                    trees.get(&root).map_or(false, |entry| {
+                        entry.snapshot.lock().as_ref().map_or(true, |s| {
+                            s.visible_index
+                                .get(&path)
+                                .map_or(true, |&row| !s.nodes[s.visible[row - 1]].explored)
+                        })
+                    })
+                };
+                if needs_rebuild {
+                    let trees = TREES.lock();
+                    if let Some(entry) = trees.get(&root) {
+                        entry.dirty.store(true, Ordering::Relaxed);
+                        *entry.last_event.lock() =
+                            Some(Instant::now() - REBUILD_DEBOUNCE - Duration::from_millis(1));
+                    }
                 }
             }
-            drop(expanded);
-            drop(trees);
+
             if update_visible_for_root(&root) {
                 bump_generation();
             }
@@ -1007,24 +1043,30 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             let Some(root) = find_root_for_path(&path) else {
                 return Ok(false);
             };
-            let trees = TREES.lock();
-            let Some(entry) = trees.get(&root) else {
-                return Ok(false);
-            };
-            let mut expanded = entry.expanded.lock();
-            let mut current = dirname(&path);
-            while let Some(dir) = current {
-                if !path_belongs_to(&dir, &root) {
-                    break;
+            {
+                let trees = TREES.lock();
+                let Some(entry) = trees.get(&root) else {
+                    return Ok(false);
+                };
+                let mut expanded = entry.expanded.lock();
+                let mut current = dirname(&path);
+                while let Some(dir) = current {
+                    if !path_belongs_to(&dir, &root) {
+                        break;
+                    }
+                    expanded.insert(dir.clone());
+                    if dir == root {
+                        break;
+                    }
+                    current = dirname(&dir);
                 }
-                expanded.insert(dir.clone());
-                if dir == root {
-                    break;
-                }
-                current = dirname(&dir);
+                drop(expanded);
+                // Expanding ancestors — trigger immediate rebuild so all newly
+                // expanded levels are loaded in one pass.
+                entry.dirty.store(true, Ordering::Relaxed);
+                *entry.last_event.lock() =
+                    Some(Instant::now() - REBUILD_DEBOUNCE - Duration::from_millis(1));
             }
-            drop(expanded);
-            drop(trees);
             if update_visible_for_root(&root) {
                 bump_generation();
             }

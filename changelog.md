@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.13.7] - 2026-03-16 — Treeview lazy loading.
+
+* Make the native tree model lazy so treeview no longer walks whole projects before showing results.
+* Fix blank or slow treeview loads on very large projects, including macOS/APFS.
+
 ## [0.13.6] - 2026-03-16 — Native treeview hot-path port.
 
 * Move treeview traversal, flattening, expand state, ignore filtering, and filesystem watching into a native async Rust tree model.
