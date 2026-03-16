@@ -162,9 +162,8 @@ function Project:files()
         max_files = config.project_scan.max_files,
       })
       for _, filename in ipairs(cached) do
-        local info = self:get_file_info(filename)
-        if info and info.type == "file" then
-          info.filename = filename
+        local info = { type = "file", size = 0, filename = filename }
+        if not self:is_ignored(info, filename) then
           coroutine.yield(self, info)
         end
       end
@@ -174,9 +173,8 @@ function Project:files()
         max_size_bytes = config.file_size_limit * 1e6
       })
       for _, filename in ipairs(cached) do
-        local info = self:get_file_info(filename)
-        if info and info.type == "file" then
-          info.filename = filename
+        local info = { type = "file", size = 0, filename = filename }
+        if not self:is_ignored(info, filename) then
           coroutine.yield(self, info)
         end
       end

@@ -54,8 +54,8 @@ command.add(nil, {
         end
         for i, project in ipairs(core.projects) do
           if common.path_belongs_to(filename, project.path) then
-            local info = project:get_file_info(filename)
-            if info and info.type == "file" then
+            local info = { type = "file", size = 0, filename = filename }
+            if not project:is_ignored(info, filename) then
               files[#files + 1] = i == 1 and filename:sub(#project.path + 2) or common.home_encode(filename)
             end
             break
@@ -71,8 +71,8 @@ command.add(nil, {
           if #files > config.plugins.findfile.file_limit then
             break
           end
-          local info = project:get_file_info(filename)
-          if info and info.type == "file" then
+          local info = { type = "file", size = 0, filename = filename }
+          if not project:is_ignored(info, filename) then
             files[#files + 1] = i == 1 and filename:sub(#project.path + 2) or common.home_encode(filename)
           end
         end

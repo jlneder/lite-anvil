@@ -8,13 +8,25 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::{Duration, Instant};
 
 use super::project_fs::{WalkOptions, walk_files};
 
+/// Minimum quiet time after the last filesystem event before triggering a
+/// file-list rebuild. Prevents rapid-fire rebuilds during active builds.
+const REBUILD_DEBOUNCE: Duration = Duration::from_millis(500);
+
 struct ProjectEntry {
-    files: Vec<String>,
+    /// Current (possibly stale while rebuilding) file list.
+    files: Arc<Mutex<Vec<String>>>,
+    /// Set by the fs watcher when any change is detected.
     dirty: Arc<AtomicBool>,
-    _watcher: RecommendedWatcher,
+    /// True while a background rebuild is in flight.
+    rebuilding: Arc<AtomicBool>,
+    /// Time of the most recent filesystem event, used for debounce.
+    last_event: Arc<Mutex<Option<Instant>>>,
+    /// Kept alive to continue receiving notifications.
+    _watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     max_size_bytes: Option<u64>,
     max_files: Option<usize>,
 }
@@ -57,54 +69,148 @@ fn build_files(root: &str, max_size_bytes: Option<u64>, max_files: Option<usize>
     )
 }
 
-fn ensure_project(
-    root: &str,
-    max_size_bytes: Option<u64>,
-    max_files: Option<usize>,
-) -> LuaResult<()> {
+/// Ensure the file list for `root` is up-to-date.
+///
+/// Returns immediately in all cases. If a rebuild is needed it is dispatched
+/// to a background thread so the Lua main thread is never blocked by I/O.
+/// Callers receive the current (possibly stale) list via `get_files`.
+fn ensure_project(root: &str, max_size_bytes: Option<u64>, max_files: Option<usize>) -> LuaResult<()> {
     let root = normalize_path(root);
-    let needs_build = {
-        let projects = PROJECTS.lock();
-        match projects.get(&root) {
-            Some(entry) => {
-                entry.dirty.load(Ordering::Relaxed)
-                    || entry.max_size_bytes != max_size_bytes
-                    || entry.max_files != max_files
-            }
-            None => true,
-        }
-    };
-    if !needs_build {
-        return Ok(());
+
+    enum Work {
+        None,
+        Rebuild {
+            files: Arc<Mutex<Vec<String>>>,
+            rebuilding: Arc<AtomicBool>,
+        },
+        NewProject {
+            files: Arc<Mutex<Vec<String>>>,
+            dirty: Arc<AtomicBool>,
+            rebuilding: Arc<AtomicBool>,
+            last_event: Arc<Mutex<Option<Instant>>>,
+            watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
+        },
     }
 
-    let dirty = Arc::new(AtomicBool::new(false));
-    let dirty_for_cb = Arc::clone(&dirty);
-    let mut watcher = RecommendedWatcher::new(
-        move |_res: notify::Result<notify::Event>| {
-            dirty_for_cb.store(true, Ordering::Relaxed);
-            #[cfg(feature = "sdl")]
-            crate::window::push_wakeup_event();
-        },
-        notify::Config::default(),
-    )
-    .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
-    watcher
-        .watch(Path::new(&root), RecursiveMode::Recursive)
-        .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+    // Determine what work to do while holding the PROJECTS lock, then release
+    // the lock before spawning any threads to avoid contention.
+    let work = {
+        let mut projects = PROJECTS.lock();
+        match projects.get_mut(&root) {
+            Some(entry) => {
+                let config_changed =
+                    entry.max_size_bytes != max_size_bytes || entry.max_files != max_files;
+                let is_dirty = entry.dirty.load(Ordering::Relaxed);
 
-    let files = build_files(&root, max_size_bytes, max_files);
-    dirty.store(false, Ordering::Relaxed);
-    PROJECTS.lock().insert(
-        root,
-        ProjectEntry {
-            files,
-            dirty,
-            _watcher: watcher,
-            max_size_bytes,
-            max_files,
-        },
-    );
+                if entry.rebuilding.load(Ordering::Relaxed) {
+                    Work::None
+                } else if !config_changed && !is_dirty {
+                    Work::None
+                } else {
+                    // Debounce: skip the rebuild if the last fs event was very
+                    // recent, unless the configuration itself changed.
+                    if is_dirty && !config_changed {
+                        let elapsed = entry
+                            .last_event
+                            .lock()
+                            .as_ref()
+                            .map(|t| t.elapsed())
+                            .unwrap_or(Duration::MAX);
+                        if elapsed < REBUILD_DEBOUNCE {
+                            return Ok(());
+                        }
+                    }
+                    entry.dirty.store(false, Ordering::Relaxed);
+                    entry.rebuilding.store(true, Ordering::Relaxed);
+                    entry.max_size_bytes = max_size_bytes;
+                    entry.max_files = max_files;
+                    Work::Rebuild {
+                        files: Arc::clone(&entry.files),
+                        rebuilding: Arc::clone(&entry.rebuilding),
+                    }
+                }
+            }
+            None => {
+                let files = Arc::new(Mutex::new(Vec::<String>::new()));
+                let dirty = Arc::new(AtomicBool::new(false));
+                let rebuilding = Arc::new(AtomicBool::new(true));
+                let last_event = Arc::new(Mutex::new(None::<Instant>));
+                let watcher = Arc::new(Mutex::new(None::<RecommendedWatcher>));
+                projects.insert(
+                    root.clone(),
+                    ProjectEntry {
+                        files: Arc::clone(&files),
+                        dirty: Arc::clone(&dirty),
+                        rebuilding: Arc::clone(&rebuilding),
+                        last_event: Arc::clone(&last_event),
+                        _watcher: Arc::clone(&watcher),
+                        max_size_bytes,
+                        max_files,
+                    },
+                );
+                Work::NewProject {
+                    files,
+                    dirty,
+                    rebuilding,
+                    last_event,
+                    watcher,
+                }
+            }
+        }
+    };
+    // PROJECTS lock released here.
+
+    match work {
+        Work::None => {}
+
+        Work::Rebuild { files: files_arc, rebuilding: rebuilding_arc } => {
+            let root_clone = root;
+            std::thread::spawn(move || {
+                let new_files = build_files(&root_clone, max_size_bytes, max_files);
+                *files_arc.lock() = new_files;
+                rebuilding_arc.store(false, Ordering::Relaxed);
+                #[cfg(feature = "sdl")]
+                crate::window::push_wakeup_event();
+            });
+        }
+
+        Work::NewProject { files, dirty, rebuilding, last_event, watcher: watcher_holder } => {
+            let dirty_for_cb = Arc::clone(&dirty);
+            let last_event_for_cb = Arc::clone(&last_event);
+            let root_clone = root;
+            std::thread::spawn(move || {
+                // Step 1: walk the project tree and populate the file list.
+                // The UI can show results as soon as this completes.
+                let new_files = build_files(&root_clone, max_size_bytes, max_files);
+                *files.lock() = new_files;
+                rebuilding.store(false, Ordering::Relaxed);
+                #[cfg(feature = "sdl")]
+                crate::window::push_wakeup_event();
+
+                // Step 2: set up the recursive watcher. This is intentionally
+                // done after the walk — on large trees, inotify setup can take
+                // seconds, and we do not want it to delay the file list.
+                let watcher_result = (|| -> Result<RecommendedWatcher, notify::Error> {
+                    let mut w = RecommendedWatcher::new(
+                        move |_res: notify::Result<notify::Event>| {
+                            dirty_for_cb.store(true, Ordering::Relaxed);
+                            // Record event time for debounce in ensure_project.
+                            *last_event_for_cb.lock() = Some(Instant::now());
+                            #[cfg(feature = "sdl")]
+                            crate::window::push_wakeup_event();
+                        },
+                        notify::Config::default(),
+                    )?;
+                    w.watch(Path::new(&root_clone), RecursiveMode::Recursive)?;
+                    Ok(w)
+                })();
+                if let Ok(watcher) = watcher_result {
+                    *watcher_holder.lock() = Some(watcher);
+                }
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -146,9 +252,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             };
             ensure_project(&root, max_size_bytes, max_files)?;
             let root = normalize_path(&root);
+            // Clone the Arc before releasing PROJECTS to avoid holding two
+            // locks simultaneously (PROJECTS then files).
+            let files_arc = PROJECTS.lock().get(&root).map(|e| Arc::clone(&e.files));
             let out = lua.create_table()?;
-            if let Some(entry) = PROJECTS.lock().get(&root) {
-                for (idx, file) in entry.files.iter().enumerate() {
+            if let Some(files_arc) = files_arc {
+                let files = files_arc.lock();
+                for (idx, file) in files.iter().enumerate() {
                     out.raw_set((idx + 1) as i64, file.as_str())?;
                 }
             }
@@ -173,8 +283,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 let root = root?;
                 ensure_project(&root, max_size_bytes, max_files)?;
                 let normalized_root = normalize_path(&root);
-                if let Some(entry) = PROJECTS.lock().get(&normalized_root) {
-                    for file in &entry.files {
+                let files_arc = PROJECTS
+                    .lock()
+                    .get(&normalized_root)
+                    .map(|e| Arc::clone(&e.files));
+                if let Some(files_arc) = files_arc {
+                    let files = files_arc.lock();
+                    for file in files.iter() {
                         out.raw_set(out_idx, file.as_str())?;
                         out_idx += 1;
                     }

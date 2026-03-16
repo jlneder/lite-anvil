@@ -1,5 +1,12 @@
 # Change Log
 
+## [0.13.4] - 2026-03-16 — Large-project responsiveness: deeper dive.
+
+* Move project file-tree walks and filesystem-watcher setup entirely off the Lua main thread into background threads; callers always get the current (possibly stale) list immediately and the UI wakes when fresh results arrive.
+* Defer inotify/FSEvents recursive watcher registration until after the file walk completes, eliminating the multi-second main-thread stall on trees with tens of thousands of directories.
+* Apply a 500 ms debounce to dirty-flag rebuilds so that build-system churn (thousands of rapid file events) triggers at most one rebuild per burst.
+* Eliminate one `stat(2)` syscall per file in `project:files()` and `core:find-file` by substituting a synthetic `{type="file", size=0}` info table; the native model already enforced the size cap, so no filtering is lost.
+
 ## [0.13.3] - 2026-03-16 — Large-project responsiveness.
 
 * Stop recursive native directory watches from expanding across entire subtrees.
