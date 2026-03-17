@@ -13,6 +13,10 @@ DATA_SRC="$SCRIPT_DIR/data"
 ICON_SRC="$SCRIPT_DIR/resources/icons/lite-anvil.png"
 DESKTOP_SRC="$SCRIPT_DIR/resources/linux/com.lite_anvil.LiteAnvil.desktop"
 
+app_version() {
+    sed -n 's/^version = "\(.*\)"$/\1/p' "$SCRIPT_DIR/forge-core/Cargo.toml" | head -n 1
+}
+
 SYSTEM=0
 for arg in "$@"; do
     case "$arg" in
@@ -271,6 +275,9 @@ install_linux() {
 }
 
 install_macos() {
+    APP_VERSION="$(app_version)"
+    [ -n "$APP_VERSION" ] || die "could not determine version from forge-core/Cargo.toml"
+
     APP=/Applications/LiteAnvil.app
     MACOS_DIR="$APP/Contents/MacOS"
     FRAMEWORKS_DIR="$APP/Contents/Frameworks"
@@ -285,7 +292,7 @@ install_macos() {
 
     bundle_macos_dylibs "$APP"
 
-    cat > "$APP/Contents/Info.plist" << 'PLIST'
+    cat > "$APP/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -297,9 +304,9 @@ install_macos() {
     <key>CFBundleIdentifier</key>
     <string>com.lite-anvil.LiteAnvil</string>
     <key>CFBundleVersion</key>
-    <string>0.14.1</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.14.1</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleExecutable</key>
     <string>lite-anvil</string>
     <key>CFBundlePackageType</key>

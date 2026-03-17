@@ -1124,6 +1124,18 @@ function core.open_doc(filename)
         return doc
       end
     end
+
+    if not (open_options and open_options.plain_text) then
+      local header = ""
+      if not new_file then
+        local fp = io.open(abs_filename, "rb")
+        if fp then
+          header = fp:read(256) or ""
+          fp:close()
+        end
+      end
+      require("core.syntax").get(abs_filename, header)
+    end
   end
   -- no existing doc for filename; create new
   local doc = Doc(filename, abs_filename, new_file, open_options)

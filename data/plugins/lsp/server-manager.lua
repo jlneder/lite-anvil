@@ -1094,8 +1094,6 @@ function manager.open_doc(doc)
     },
   })
 
-  manager.schedule_semantic_refresh(doc, 0.1)
-
   return client
 end
 

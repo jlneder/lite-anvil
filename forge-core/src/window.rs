@@ -103,7 +103,7 @@ pub fn init() -> Result<()> {
     unsafe {
         SDL_SetAppMetadata(
             c"Lite Anvil".as_ptr(),
-            c"0.14.1".as_ptr(),
+            concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast(),
             c"com.lite-anvil.LiteAnvil".as_ptr(),
         );
     }

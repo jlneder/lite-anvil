@@ -5,6 +5,7 @@ local config = require "core.config"
 local Doc = require "core.doc"
 local keymap = require "core.keymap"
 local LogView = require "core.logview"
+local style = require "core.style"
 local native_picker = nil
 
 do
@@ -251,7 +252,17 @@ local function open_shortcuts_help_doc()
   view.scroll.y = 0
 end
 
+local function show_version()
+  local text = string.format("Lite-Anvil %s", VERSION)
+  core.status_view:show_message("i", style.text, text)
+  core.log("%s", text)
+end
+
 command.add(nil, {
+  ["about:version"] = function()
+    show_version()
+  end,
+
   ["core:quit"] = function()
     core.quit()
   end,

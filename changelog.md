@@ -1,5 +1,12 @@
 # Change Log
 
+## [0.14.2] - 2026-03-17 — About:version and highlight-open fix.
+
+* Preload the matching language plugin before opening a file so syntax-highlighted files render once, immediately, without a plain-text flash.
+* Stop requesting LSP semantic token overlays on initial open, avoiding a second recolor pass right after the file appears.
+* Make app and installer build-version metadata derive from the package version instead of duplicated literals.
+* Add an `about:version` command that shows the current Lite-Anvil version inside the app.
+
 ## [0.14.1] - 2026-03-17 — macOS bundle/signing fixes.
 
 * Fix macOS app metadata to use the current release version and a valid bundle identifier.
