@@ -1,5 +1,13 @@
 # Change Log
 
+## [0.16.0] - 2026-03-19 — All core modules and bundled plugins Rust-owned.
+
+* Move all `core.*` modules (config, style, syntax, tokenizer, highlighter, command, keymap, process, view, scrollbar, contextmenu, nagview, logview, commandview, all commands submodules, doc.search, doc.translate, common, object, strict, regex, storage, utf8string, gitignore, dirwatch, ime, project, plugin_api, modkeys, emptyview, titleview, and more) to Rust-owned `package.preload` entries. Every `require "core.*"` call is now intercepted before any disk lookup.
+* Move all bundled plugins (`plugins.autocomplete`, `plugins.autoreload`, `plugins.autorestart`, `plugins.bracketmatch`, `plugins.detectindent`, `plugins.drawwhitespace`, `plugins.findfile`, `plugins.folding`, `plugins.git` and sub-modules, `plugins.language_md`, `plugins.lineguide`, `plugins.linewrapping`, `plugins.macro`, `plugins.markdown_preview` and sub-modules, `plugins.projectreplace`, `plugins.projectsearch`, `plugins.quote`, `plugins.reflow`, `plugins.remotessh`, `plugins.scale`, `plugins.tabularize`, `plugins.theme_toggle`, `plugins.toolbarview`, `plugins.terminal` and sub-modules, `plugins.trimwhitespace`) to Rust-owned preloads. Plugins are discovered from disk metadata but loaded from the binary.
+* Embed all six bundled color themes (`colors.default`, `colors.dark_default`, `colors.light_default`, `colors.fall`, `colors.summer`, `colors.textadept`) as Rust-owned preloads.
+* Delete orphaned `data/core/start.lua` (superseded by `runtime.rs` startup logic).
+* JSON syntax assets are parsed by Rust via `native_tokenizer.load_assets()`; `plugins.lsp.json` dependency removed from syntax initialization.
+
 ## [0.15.1] - 2026-03-19 — New window command and clippy cleanup.
 
 * Add `core:new-window` command (`Ctrl+Shift+N` / `Cmd+Shift+N`) that opens a new editor instance by spawning the current executable.

@@ -1,3 +1,9 @@
+use mlua::prelude::*;
+
+/// Embedded Lua bootstrap for `core.doc.highlighter`.
+///
+/// Replaces `data/core/doc/highlighter.lua` which is no longer read from disk.
+const BOOTSTRAP: &str = r#"
 local core = require "core"
 local common = require "core.common"
 local tokenizer = require "core.tokenizer"
@@ -22,7 +28,6 @@ function Highlighter:new(doc)
 end
 
 
--- init incremental syntax highlighting
 function Highlighter:start()
   if self.running then return end
   self.running = true
@@ -34,7 +39,6 @@ function Highlighter:start()
         local state = (i > 1) and self.lines[i - 1].state
         local line = self.lines[i]
         if line and line.resume and (line.init_state ~= state or line.text ~= self.doc.lines[i]) then
-          -- Reset the progress if no longer valid
           line.resume = nil
         end
         if not (line and line.init_state == state and line.text == self.doc.lines[i] and not line.resume) then
@@ -113,7 +117,6 @@ function Highlighter:remove_notify(line, n)
 end
 
 function Highlighter:update_notify(line, n)
-  -- plugins can hook here to be notified that lines have been retokenized
 end
 
 calc_signature = function(positioned_tokens)
@@ -321,3 +324,17 @@ function Highlighter:each_token(idx)
 end
 
 return Highlighter
+"#;
+
+/// Register `core.doc.highlighter` as a Rust-owned preload.
+pub fn register_preload(lua: &Lua) -> LuaResult<()> {
+    let preload: LuaTable = lua.globals().get::<LuaTable>("package")?.get("preload")?;
+    preload.set(
+        "core.doc.highlighter",
+        lua.create_function(|lua, ()| {
+            lua.load(BOOTSTRAP)
+                .set_name("core.doc.highlighter")
+                .eval::<LuaValue>()
+        })?,
+    )
+}

@@ -2,9 +2,145 @@ use mlua::prelude::*;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use pcre2::bytes::{Regex, RegexBuilder};
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
+
+fn json_to_lua(lua: &Lua, value: &JsonValue) -> LuaResult<LuaValue> {
+    match value {
+        JsonValue::Null => Ok(LuaValue::Nil),
+        JsonValue::Bool(b) => Ok(LuaValue::Boolean(*b)),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(LuaValue::Integer(i))
+            } else {
+                Ok(LuaValue::Number(n.as_f64().unwrap_or(0.0)))
+            }
+        }
+        JsonValue::String(s) => Ok(LuaValue::String(lua.create_string(s)?)),
+        JsonValue::Array(arr) => {
+            let t = lua.create_table()?;
+            for (i, v) in arr.iter().enumerate() {
+                t.raw_set(i as i64 + 1, json_to_lua(lua, v)?)?;
+            }
+            Ok(LuaValue::Table(t))
+        }
+        JsonValue::Object(obj) => {
+            let t = lua.create_table()?;
+            for (k, v) in obj {
+                t.raw_set(k.as_str(), json_to_lua(lua, v)?)?;
+            }
+            Ok(LuaValue::Table(t))
+        }
+    }
+}
+
+/// Resolves a JSON value that may contain `{"$ref": "N"}` cross-references.
+/// `nodes` is the `graph.nodes` map; `cache` prevents duplicate table creation.
+fn resolve_graph_value(
+    lua: &Lua,
+    nodes: &serde_json::Map<String, JsonValue>,
+    value: &JsonValue,
+    cache: &mut HashMap<String, LuaTable>,
+) -> LuaResult<LuaValue> {
+    if let Some(JsonValue::String(ref_id)) = value.get("$ref") {
+        if let Some(t) = cache.get(ref_id) {
+            return Ok(LuaValue::Table(t.clone()));
+        }
+        let node = nodes
+            .get(ref_id)
+            .ok_or_else(|| LuaError::RuntimeError(format!("missing graph node {ref_id}")))?;
+        let t = lua.create_table()?;
+        // Pre-insert before filling to handle any cyclic refs.
+        cache.insert(ref_id.clone(), t.clone());
+        let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or("object");
+        if let Some(values) = node.get("values") {
+            if kind == "array" {
+                if let JsonValue::Array(arr) = values {
+                    for (i, item) in arr.iter().enumerate() {
+                        let v = resolve_graph_value(lua, nodes, item, cache)?;
+                        t.raw_set(i as i64 + 1, v)?;
+                    }
+                }
+            } else if let JsonValue::Object(obj) = values {
+                for (k, v) in obj {
+                    let resolved = resolve_graph_value(lua, nodes, v, cache)?;
+                    t.raw_set(k.as_str(), resolved)?;
+                }
+            }
+        }
+        return Ok(LuaValue::Table(t));
+    }
+    match value {
+        JsonValue::Object(obj) => {
+            let t = lua.create_table()?;
+            for (k, v) in obj {
+                t.raw_set(k.as_str(), resolve_graph_value(lua, nodes, v, cache)?)?;
+            }
+            Ok(LuaValue::Table(t))
+        }
+        JsonValue::Array(arr) => {
+            let t = lua.create_table()?;
+            for (i, v) in arr.iter().enumerate() {
+                t.raw_set(i as i64 + 1, resolve_graph_value(lua, nodes, v, cache)?)?;
+            }
+            Ok(LuaValue::Table(t))
+        }
+        _ => json_to_lua(lua, value),
+    }
+}
+
+/// Scans `{datadir}/assets/syntax/*.json`, resolves their shared-node graph
+/// format, and returns a Lua array of syntax definition tables.
+fn load_assets_impl(lua: &Lua, datadir: &str) -> LuaResult<LuaTable> {
+    let syntax_dir = format!("{datadir}/assets/syntax");
+    let out = lua.create_table()?;
+    let entries = match std::fs::read_dir(&syntax_dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(out),
+    };
+    let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    let mut idx = 1i64;
+    for path in paths {
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        if ext != "json" {
+            continue;
+        }
+        let source = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let decoded: JsonValue = match serde_json::from_str(&source) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let payload = decoded.get("syntax").unwrap_or(&decoded);
+        let table = if let (Some(graph), Some(root)) =
+            (payload.get("graph"), payload.get("root"))
+        {
+            let Some(nodes) = graph.get("nodes").and_then(|n| n.as_object()) else {
+                continue;
+            };
+            let mut cache = HashMap::new();
+            match resolve_graph_value(lua, nodes, root, &mut cache)? {
+                LuaValue::Table(t) => t,
+                _ => continue,
+            }
+        } else {
+            match json_to_lua(lua, payload)? {
+                LuaValue::Table(t) => t,
+                _ => continue,
+            }
+        };
+        out.raw_set(idx, table)?;
+        idx += 1;
+    }
+    Ok(out)
+}
 
 #[derive(Clone)]
 enum MatcherKind {
@@ -896,6 +1032,11 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
     module.set("available", lua.create_function(|_, ()| Ok(true))?)?;
 
     module.set(
+        "load_assets",
+        lua.create_function(|lua, datadir: String| load_assets_impl(lua, &datadir))?,
+    )?;
+
+    module.set(
         "register_syntax",
         lua.create_function(|lua, (name, spec): (String, LuaTable)| {
             let id = compile_syntax_table(spec)?;
@@ -989,6 +1130,11 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // REGISTRY is a process-global static. Tests run in parallel by default,
+    // so we serialize them with this lock to prevent races on registry resets.
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     fn setup_lua() -> LuaResult<Lua> {
         let lua = Lua::new();
@@ -1025,6 +1171,7 @@ mod tests {
 
     #[test]
     fn tokenizes_simple_patterns() -> LuaResult<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
         *REGISTRY.lock() = SyntaxRegistry::default();
         let lua = setup_lua()?;
         let id = register(
@@ -1057,6 +1204,7 @@ mod tests {
 
     #[test]
     fn preserves_multiline_pair_state() -> LuaResult<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
         *REGISTRY.lock() = SyntaxRegistry::default();
         let lua = setup_lua()?;
         let id = register(
@@ -1094,6 +1242,7 @@ mod tests {
 
     #[test]
     fn supports_capture_splits() -> LuaResult<()> {
+        let _guard = TEST_MUTEX.lock().unwrap();
         *REGISTRY.lock() = SyntaxRegistry::default();
         let lua = setup_lua()?;
         let id = register(
