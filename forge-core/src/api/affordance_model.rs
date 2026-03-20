@@ -109,7 +109,7 @@ fn next_visible_line(line: usize, folds: &[(usize, usize)]) -> usize {
     line + 1
 }
 
-fn bracket_pair(
+pub(crate) fn bracket_pair(
     lines: &[String],
     start_line: usize,
     start_col: usize,
@@ -194,7 +194,7 @@ fn count_empty_end_lines(lines: &[String]) -> usize {
     count
 }
 
-fn detect_indent(
+pub(crate) fn detect_indent(
     lines: &[String],
     max_lines: usize,
     default_indent: usize,

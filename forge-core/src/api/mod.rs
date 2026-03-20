@@ -36,6 +36,7 @@ mod keymap_macos;
 mod keymap;
 mod language_md;
 mod lineguide;
+mod linewrap;
 mod linewrapping;
 mod logview;
 mod plugin_macro;

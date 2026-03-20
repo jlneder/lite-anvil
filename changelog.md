@@ -1,12 +1,19 @@
 # Change Log
 
-## [0.16.0] - 2026-03-19 — All core modules and bundled plugins Rust-owned.
+## [0.16.0] - 2026-03-20 — More progress on core modules to Rust and moving some plugins into core.
 
 * Move all `core.*` modules (config, style, syntax, tokenizer, highlighter, command, keymap, process, view, scrollbar, contextmenu, nagview, logview, commandview, all commands submodules, doc.search, doc.translate, common, object, strict, regex, storage, utf8string, gitignore, dirwatch, ime, project, plugin_api, modkeys, emptyview, titleview, and more) to Rust-owned `package.preload` entries. Every `require "core.*"` call is now intercepted before any disk lookup.
 * Move all bundled plugins (`plugins.autocomplete`, `plugins.autoreload`, `plugins.autorestart`, `plugins.bracketmatch`, `plugins.detectindent`, `plugins.drawwhitespace`, `plugins.findfile`, `plugins.folding`, `plugins.git` and sub-modules, `plugins.language_md`, `plugins.lineguide`, `plugins.linewrapping`, `plugins.macro`, `plugins.markdown_preview` and sub-modules, `plugins.projectreplace`, `plugins.projectsearch`, `plugins.quote`, `plugins.reflow`, `plugins.remotessh`, `plugins.scale`, `plugins.tabularize`, `plugins.theme_toggle`, `plugins.toolbarview`, `plugins.terminal` and sub-modules, `plugins.trimwhitespace`) to Rust-owned preloads. Plugins are discovered from disk metadata but loaded from the binary.
 * Embed all six bundled color themes (`colors.default`, `colors.dark_default`, `colors.light_default`, `colors.fall`, `colors.summer`, `colors.textadept`) as Rust-owned preloads.
 * Delete orphaned `data/core/start.lua` (superseded by `runtime.rs` startup logic).
 * JSON syntax assets are parsed by Rust via `native_tokenizer.load_assets()`; `plugins.lsp.json` dependency removed from syntax initialization.
+* Tech debt: Move all Lua embedded in Rust source strings to external `.lua` files loaded via `include_str!`; no functional change.
+* Move `plugins.bracketmatch` and `plugins.detectindent` fully to Rust: bracket-pair highlighting computed in `affordance_model`, indent detection in `doc_native`, all commands in `detectindent.rs`; delete `data/plugins/bracketmatch.lua` and `data/plugins/detectindent.lua`.
+* Move `plugins.linewrapping` fully to Rust: line-break computation, wrap-state management, and all coordinate/rendering overrides implemented in `linewrap.rs` and `docview.rs`; commands and translate-function patches registered from `linewrapping.rs`; delete `data/plugins/linewrapping.lua`. (57.7% Rust)
+* Move `plugins.git` async state management to Rust: background-threaded `git status` refresh with change-detection cache, per-file-entry state map, and async command dispatch via handle polling, all in `git.rs`; `git_plugin.rs` embeds the three Lua modules as inline const strings; delete `data/plugins/git/{status,init,ui}.lua`. (59.4% Rust)
+* Move `plugins.lsp.json` and `plugins.lsp.protocol` to native Rust modules (direct delegation to `lsp_protocol`); move `plugins.lsp.client` to an inline Rust const string; delete all three Lua source files. (59.8% Rust)
+* Move `plugins.lsp.server-manager` (1,892 lines) to an inline Rust const string in `lsp_plugin_preloads.rs`; delete `forge-core/src/api/lua/plugins_lsp_server_manager.lua`. (63.5% Rust)
+* Move `plugins.lsp` init module (507 lines) to an inline Rust const string in `lsp_plugin_preloads.rs`; delete `forge-core/src/api/lua/plugins_lsp_init.lua`. All LSP Lua sources are now embedded in the binary. (64.5% Rust)
 
 ## [0.15.1] - 2026-03-19 — New window command and clippy cleanup.
 

@@ -1261,6 +1261,37 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
         })?,
     )?;
 
+    module.set(
+        "update_indent_info",
+        lua.create_function(|lua, doc: LuaTable| {
+            let globals = lua.globals();
+            let require: LuaFunction = globals.get("require")?;
+            let config: LuaTable = require.call("core.config")?;
+            let default_indent: usize = config.get("indent_size").unwrap_or(4);
+            let default_type: String = config.get("tab_type").unwrap_or_else(|_| "soft".into());
+            let lines_table: LuaTable = doc.get("lines")?;
+            let count = lines_table.raw_len();
+            let mut lines = Vec::with_capacity(count);
+            for i in 1..=count {
+                lines.push(lines_table.get::<String>(i)?);
+            }
+            const MAX_LINES: usize = 150;
+            const SCORE_THRESHOLD: usize = 2;
+            let (detected_type, detected_size, score) =
+                super::affordance_model::detect_indent(&lines, MAX_LINES, default_indent);
+            let indent_type =
+                if score >= SCORE_THRESHOLD { detected_type } else { default_type.as_str() };
+            let indent_size =
+                if score >= SCORE_THRESHOLD { detected_size } else { default_indent };
+            let info = lua.create_table()?;
+            info.set("type", indent_type)?;
+            info.set("size", indent_size as i64)?;
+            info.set("confirmed", score >= SCORE_THRESHOLD)?;
+            doc.set("indent_info", info)?;
+            Ok(())
+        })?,
+    )?;
+
     Ok(module)
 }
 

@@ -1,9 +1,12 @@
 use mlua::prelude::*;
-/// Embedded Lua bootstrap for `plugins.bracketmatch`. Replaces `data/plugins/bracketmatch.lua`.
-const BOOTSTRAP: &str = include_str!("../../../data/plugins/bracketmatch.lua");
+
+/// Bracket matching is implemented directly in `docview.rs`. This preload is a no-op kept
+/// so that any `require "plugins.bracketmatch"` calls from user configs do not error.
 pub fn register_preload(lua: &Lua) -> LuaResult<()> {
     let preload: LuaTable = lua.globals().get::<LuaTable>("package")?.get("preload")?;
-    preload.set("plugins.bracketmatch", lua.create_function(|lua, ()| {
-        lua.load(BOOTSTRAP).set_name("plugins.bracketmatch").eval::<LuaValue>()
-    })?)
+    preload.set(
+        "plugins.bracketmatch",
+        lua.create_function(|_, ()| Ok(LuaValue::Boolean(true)))?,
+    )?;
+    Ok(())
 }

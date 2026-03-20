@@ -86,6 +86,7 @@ function Doc:new(filename, abs_filename, new_file, options)
   if new_file then
     self.crlf = config.line_endings == "crlf"
   end
+  doc_native.update_indent_info(self)
 end
 
 function Doc:ensure_loaded()
@@ -224,6 +225,9 @@ end
 function Doc:clean()
   self.clean_change_id = self:get_change_id()
   self.clean_signature = self:get_content_signature(self.clean_change_id)
+  if not (self.indent_info and self.indent_info.confirmed) then
+    doc_native.update_indent_info(self)
+  end
 end
 
 function Doc:get_content_signature(change_id)
