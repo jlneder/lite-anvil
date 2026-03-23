@@ -2104,8 +2104,8 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                 let line = match it.next() { Some(LuaValue::Integer(n)) => n, _ => 1 };
                 let col  = match it.next() { Some(LuaValue::Integer(n)) => n, _ => 1 };
                 if col > 1 {
-                    let prev: String = doc.get::<LuaFunction>("get_char")?.call((doc, line, col - 1))?;
-                    if prev == ":" { "::".to_owned() } else { text }
+                    let prev: LuaString = doc.get::<LuaFunction>("get_char")?.call((doc, line, col - 1))?;
+                    if prev.as_bytes() == b":" { "::".to_owned() } else { text }
                 } else { text }
             } else { text };
             let triggered = triggers.sequence_values::<String>().any(|r| r.map(|s| s == trigger_text).unwrap_or(false));

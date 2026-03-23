@@ -1422,7 +1422,7 @@ fn docview_draw_overlay(lua: &Lua, this: LuaTable) -> LuaResult<()> {
                 {
                     let (x, y): (f64, f64) = this.call_method("get_line_screen_position", (line1, col1))?;
                     if doc.get::<bool>("overwrite")? {
-                        let ch: String = doc.call_method("get_char", (line1, col1))?;
+                        let ch: LuaString = doc.call_method("get_char", (line1, col1))?;
                         let width: f64 = font_call_method(&docview_get_font(lua, &this)?, "get_width", ch)?;
                         this.call_method::<()>("draw_overwrite_caret", (x, y, width))?;
                     } else {

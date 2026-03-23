@@ -8,13 +8,17 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
         lua.create_function(|lua, ()| {
             let module = lua.create_table()?;
 
-            let is_non_word = lua.create_function(|lua, ch: String| {
+            let is_non_word = lua.create_function(|lua, ch: LuaString| {
                 let config: LuaTable = lua
                     .globals()
                     .get::<LuaFunction>("require")?
                     .call("core.config")?;
-                let non_word_chars: String = config.get("non_word_chars")?;
-                Ok(non_word_chars.contains(&*ch))
+                let non_word_chars: LuaString = config.get("non_word_chars")?;
+                let ch_bytes: &[u8] = &ch.as_bytes();
+                Ok(non_word_chars
+                    .as_bytes()
+                    .windows(ch_bytes.len())
+                    .any(|w| w == ch_bytes))
             })?;
             lua.set_named_registry_value("doc_translate.is_non_word", is_non_word)?;
 
@@ -31,11 +35,15 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let (mut l, mut c): (i64, i64) =
                         pos_offset.call((&doc, line, col, -1))?;
                     loop {
-                        let ch: String = get_char.call((&doc, l, c))?;
+                        let ch: LuaString = get_char.call((&doc, l, c))?;
                         if !is_utf8_cont.call::<bool>(ch)? {
                             break;
                         }
-                        (l, c) = pos_offset.call((&doc, l, c, -1))?;
+                        let (nl, nc): (i64, i64) = pos_offset.call((&doc, l, c, -1))?;
+                        if nl == l && nc == c {
+                            break;
+                        }
+                        (l, c) = (nl, nc);
                     }
                     Ok((l, c))
                 })?,
@@ -54,11 +62,15 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let (mut l, mut c): (i64, i64) =
                         pos_offset.call((&doc, line, col, 1))?;
                     loop {
-                        let ch: String = get_char.call((&doc, l, c))?;
+                        let ch: LuaString = get_char.call((&doc, l, c))?;
                         if !is_utf8_cont.call::<bool>(ch)? {
                             break;
                         }
-                        (l, c) = pos_offset.call((&doc, l, c, 1))?;
+                        let (nl, nc): (i64, i64) = pos_offset.call((&doc, l, c, 1))?;
+                        if nl == l && nc == c {
+                            break;
+                        }
+                        (l, c) = (nl, nc);
                     }
                     Ok((l, c))
                 })?,
@@ -75,7 +87,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     loop {
                         let (l2, c2): (i64, i64) =
                             pos_offset.call((&doc, l, c, -1))?;
-                        let ch: String = get_char.call((&doc, l2, c2))?;
+                        let ch: LuaString = get_char.call((&doc, l2, c2))?;
                         if is_non_word.call::<bool>(ch)? || (l == l2 && c == c2) {
                             break;
                         }
@@ -96,7 +108,7 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     loop {
                         let (l2, c2): (i64, i64) =
                             pos_offset.call((&doc, l, c, 1))?;
-                        let ch: String = get_char.call((&doc, l, c))?;
+                        let ch: LuaString = get_char.call((&doc, l, c))?;
                         if is_non_word.call::<bool>(ch)? || (l == l2 && c == c2) {
                             break;
                         }
@@ -119,16 +131,17 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                         .call::<LuaTable>("core.doc.translate")?
                         .get("start_of_word")?;
                     let (mut l, mut c) = (line, col);
-                    let mut prev: Option<String> = None;
+                    let mut prev: Option<Vec<u8>> = None;
                     while l > 1 || c > 1 {
                         let (nl, nc): (i64, i64) =
                             pos_offset.call((&doc, l, c, -1))?;
-                        let ch: String = get_char.call((&doc, nl, nc))?;
+                        let ch: LuaString = get_char.call((&doc, nl, nc))?;
                         let is_nw = is_non_word.call::<bool>(ch.clone())?;
-                        if prev.is_some() && prev.as_deref() != Some(&ch) || !is_nw {
+                        let ch_bytes: &[u8] = &ch.as_bytes();
+                        if prev.as_deref().is_some_and(|p| p != ch_bytes) || !is_nw {
                             break;
                         }
-                        prev = Some(ch);
+                        prev = Some(ch_bytes.to_vec());
                         (l, c) = (nl, nc);
                     }
                     start_of_word.call::<LuaMultiValue>((&doc, l, c))
@@ -151,15 +164,16 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                     let (end_line, end_col): (i64, i64) =
                         end_of_doc.call((&doc, line, col))?;
                     let (mut l, mut c) = (line, col);
-                    let mut prev: Option<String> = None;
+                    let mut prev: Option<Vec<u8>> = None;
                     while l < end_line || c < end_col {
-                        let ch: String = get_char.call((&doc, l, c))?;
+                        let ch: LuaString = get_char.call((&doc, l, c))?;
                         let is_nw = is_non_word.call::<bool>(ch.clone())?;
-                        if prev.is_some() && prev.as_deref() != Some(&ch) || !is_nw {
+                        let ch_bytes: &[u8] = &ch.as_bytes();
+                        if prev.as_deref().is_some_and(|p| p != ch_bytes) || !is_nw {
                             break;
                         }
                         (l, c) = pos_offset.call((&doc, l, c, 1))?;
-                        prev = Some(ch);
+                        prev = Some(ch_bytes.to_vec());
                     }
                     end_of_word.call::<LuaMultiValue>((&doc, l, c))
                 })?,

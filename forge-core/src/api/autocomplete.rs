@@ -426,10 +426,10 @@ fn show_autocomplete(lua: &Lua, state: &LuaTable, ac: &LuaTable) -> LuaResult<()
                 reset_suggestions(lua, state, ac)?;
                 return Ok(());
             }
-            let char_before: String = doc.call_method("get_char", (line, col - 1, line, col - 1))?;
-            let is_space = char_before.chars().next().map(|c| c.is_whitespace()).unwrap_or(false);
-            let is_punct_moved = char_before.chars().next().map(|c| c.is_ascii_punctuation()).unwrap_or(false)
-                && col != last_col_i;
+            let char_before: LuaString = doc.call_method("get_char", (line, col - 1, line, col - 1))?;
+            let byte = char_before.as_bytes().first().copied().unwrap_or(0);
+            let is_space = byte.is_ascii_whitespace();
+            let is_punct_moved = byte.is_ascii_punctuation() && col != last_col_i;
             if is_space || is_punct_moved {
                 reset_suggestions(lua, state, ac)?;
                 return Ok(());

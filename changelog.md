@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.18.2] - 2026-03-23 — Lua iterator and UTF-8 navigation fixes.
+
+* Fix freeze when arrow-key navigating through multi-byte UTF-8 text near document boundaries. `previous_char` and `next_char` in `doc_translate` looped on continuation bytes without checking whether `position_offset` actually advanced; at the start/end of a document the position stays unchanged, producing an infinite loop. Added boundary guards that break when the position stops moving.
+* Fix "error converting Lua string to String (incomplete utf-8 byte sequence)" crash when navigating through non-ASCII text. `Doc:get_char` returns a single byte via Lua `string.sub`, which for multi-byte UTF-8 characters yields an incomplete byte sequence that cannot be converted to a Rust `String`. Changed all `get_char` consumers in `doc_translate`, `docview`, `autocomplete`, and `lsp_plugin_preloads` to use `LuaString` (raw bytes) instead of `String`, and updated `is_non_word` to operate on byte slices.
+* Fix command palette crash from incorrectly driven Lua iterator protocol. `commands_findreplace` captured only the iterator function from `Doc:get_selections()`, discarding the invariant table and start index required by Lua's generic-for protocol. The iterator was then called with no arguments, making `invariant` nil inside `selection_iterator`. Added `collect_selections` helper that properly unpacks all three return values and drives the iterator correctly.
+
 ## [0.18.1] - 2026-03-23 — Dirty-state tracking behavior fix.
 * Move content signature (FNV-1a hash) to native Rust in `BufferState`.
 * Fix stale signature cache after `load_file_into_state`.

@@ -7,6 +7,36 @@ fn require_table(lua: &Lua, name: &str) -> LuaResult<LuaTable> {
     require.call(name)
 }
 
+/// Collects all selections from doc:get_selections(), properly driving the Lua iterator protocol.
+///
+/// Each returned Vec contains [idx, line1, col1, line2, col2].
+fn collect_selections(
+    doc: &LuaTable,
+    sort_intra: bool,
+    idx_reverse: LuaValue,
+) -> LuaResult<Vec<Vec<LuaValue>>> {
+    let ret: LuaMultiValue = doc.call_method("get_selections", (sort_intra, idx_reverse))?;
+    let mut ret_vals = ret.into_iter();
+    let iter_fn = match ret_vals.next() {
+        Some(LuaValue::Function(f)) => f,
+        _ => return Err(mlua::Error::runtime("get_selections: expected iterator function")),
+    };
+    let invariant = ret_vals.next().unwrap_or(LuaValue::Nil);
+    let mut control = ret_vals.next().unwrap_or(LuaValue::Nil);
+
+    let mut results = Vec::new();
+    loop {
+        let result: LuaMultiValue = iter_fn.call((invariant.clone(), control))?;
+        let vals: Vec<LuaValue> = result.into_iter().collect();
+        if vals.first().is_none_or(|v| v.is_nil()) {
+            break;
+        }
+        control = vals[0].clone();
+        results.push(vals);
+    }
+    Ok(results)
+}
+
 /// Gets the current doc: active DocView's doc, or last_view's doc as fallback.
 fn get_doc(lua: &Lua, state: &LuaTable) -> LuaResult<Option<LuaTable>> {
     let core: LuaTable = require_table(lua, "core")?;
@@ -179,14 +209,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             None => Ok(false),
             Some(doc) => {
                 let mut text: Option<String> = None;
-                let selections: LuaFunction = doc.call_method("get_selections", (true, true))?;
-                loop {
-                    let result: LuaMultiValue = selections.call(())?;
-                    let vals: Vec<LuaValue> = result.into_iter().collect();
-                    let idx = &vals[0];
-                    if idx.is_nil() {
-                        break;
-                    }
+                let sels = collect_selections(&doc, true, LuaValue::Boolean(true))?;
+                for vals in &sels {
                     let line1 = &vals[1];
                     let col1 = &vals[2];
                     let line2 = &vals[3];
@@ -290,14 +314,9 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
         let mut ic1: Option<LuaValue> = None;
 
         // Collect selections to avoid iterator interference
-        let selections: LuaFunction = doc.call_method("get_selections", (true, true))?;
+        let sel_vals = collect_selections(&doc, true, LuaValue::Boolean(true))?;
         let mut sels = Vec::new();
-        loop {
-            let result: LuaMultiValue = selections.call(())?;
-            let vals: Vec<LuaValue> = result.into_iter().collect();
-            if vals[0].is_nil() {
-                break;
-            }
+        for vals in sel_vals {
             sels.push((
                 vals[1].clone(),
                 vals[2].clone(),
@@ -335,14 +354,8 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
 
                 // Check if rl2,rc2 is already in an existing selection
                 let mut in_sel = false;
-                let check_sels: LuaFunction =
-                    doc.call_method("get_selections", (true, false))?;
-                loop {
-                    let sv: LuaMultiValue = check_sels.call(())?;
-                    let sv: Vec<LuaValue> = sv.into_iter().collect();
-                    if sv[0].is_nil() {
-                        break;
-                    }
+                let check_sels = collect_selections(&doc, true, LuaValue::Boolean(false))?;
+                for sv in &check_sels {
                     if is_in_selection(&rl2, &rc2, &sv[1], &sv[2], &sv[3], &sv[4]) {
                         in_sel = true;
                         break;
