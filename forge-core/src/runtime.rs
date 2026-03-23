@@ -131,8 +131,7 @@ fn apply_appimage_workdir_fix() -> Result<()> {
 
 fn find_data_dir(exe_dir: &Path) -> PathBuf {
     fn is_data_dir(candidate: &Path) -> bool {
-        candidate.join("core").join("utf8string.lua").exists()
-            && candidate.join("colors").join("default.lua").exists()
+        candidate.join("colors").join("default.lua").exists()
     }
 
     if let Some(prefix) = std::env::var_os("LITE_PREFIX") {

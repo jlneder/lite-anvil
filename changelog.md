@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.18.0] - 2026-03-23 — Core runtime fully native Rust.
+* Converted all 38 `data/core/*.lua` files and the `core` orchestrator to pure Rust via mlua.
+* Some key fixes including around Lua/C/Rust boundaries, yielding, and closures.
+
 ## [0.17.3] - 2026-03-22 — Command palette, open, and script fixes.
 * Fix command palette input showing only the very last character of a path (e.g. "e" from "forge-core/"). `docview_get_line_screen_position` used `docview_get_gutter_width` (Rust, line-number-based, ~28 px) to position text on screen, while `scroll_to_make_visible` and the clip rect both used `gutter_width_from_method` (virtual Lua dispatch, returns CommandView's label width, ~98 px). The 70 px discrepancy caused `scroll_to_make_visible` to over-scroll by exactly that amount, leaving only the last character in view. Changed `docview_get_line_screen_position` to use `gutter_width_from_method` so all three subsystems agree on where text starts — for regular DocView the result is identical (both paths call the same Rust function), and for CommandView the label width is used consistently.
 * Fix path truncation and invisible-backspace in the Open File (and all other) command palette inputs. `CommandView:scroll_to_make_visible` was a no-op and `get_h_scrollable_size` returned 0, so the view never scrolled horizontally and `View:clamp_scroll_position` immediately zeroed any scroll.x that was set. Now `scroll_to_make_visible` delegates to DocView for horizontal tracking (resetting y=0 to stay single-line), `clamp_scroll_position` is overridden to preserve x while locking y=0, and the `get_h_scrollable_size` override is removed so the inherited `math.huge` allows the scroll position to be maintained.
