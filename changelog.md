@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.19.3] - 2026-03-24 — Cross-platform "Open With" file associations.
+* Register Lite-Anvil for "Open With" on all platforms for 100+ file extensions matching supported syntax types plus .txt, .log, .conf, .env, .diff, .patch, Dockerfile, and other common text files.
+* Linux: updated .desktop file with full MimeType list; included in .tar.gz and .deb archives.
+* macOS: new Info.plist with CFBundleDocumentTypes covering all extensions and UTI content types; replaces inline plist in CI.
+* Windows: PowerShell scripts (install/uninstall-file-associations.ps1) register per-user OpenWithProgids for all extensions; included in .zip archive.
+
 ## [0.19.2] - 2026-03-24 — macOS Intel link fix.
 * Fix macOS x86_64 link failure: undefined `HVF_*` symbols from FreeType HEAD (VER-2-14-3, released 2026-03-22). Pin CI FreeType build to VER-2-14-2. Provide C stub fallbacks via `cc` build dep for local builds against newer FreeType.
 

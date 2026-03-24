@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Lite-Anvil
-Comment=A lightweight text editor written in Lua with a Rust core
+Comment=A lightweight text editor
 Exec=lite-anvil %F
 Icon=lite-anvil
 Terminal=false
 StartupWMClass=lite-anvil
-Categories=Development;IDE;
-MimeType=text/plain;inode/directory;
+Categories=Development;IDE;TextEditor;
+MimeType=text/plain;text/x-csrc;text/x-chdr;text/x-c++src;text/x-c++hdr;text/x-csharp;text/x-java;text/x-python;text/x-ruby;text/x-perl;text/x-shellscript;text/x-lua;text/x-go;text/x-rustsrc;text/x-swift;text/x-kotlin;text/x-scala;text/x-haskell;text/x-lisp;text/x-scheme;text/x-clojure;text/x-elixir;text/x-erlang;text/x-ocaml;text/x-fsharp;text/x-crystal;text/x-zig;text/x-dart;text/x-julia;text/x-r;text/x-d;text/x-gleam;text/html;text/css;text/javascript;text/x-typescript;text/x-tsx;text/x-jsx;text/xml;text/x-yaml;text/x-toml;text/x-ini;text/x-makefile;text/markdown;text/x-sql;text/x-php;text/csv;text/x-log;text/x-diff;text/x-cmake;text/x-meson;application/json;application/xml;application/x-shellscript;application/javascript;application/typescript;application/toml;application/x-yaml;application/sql;application/x-php;inode/directory;

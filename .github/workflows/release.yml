@@ -62,6 +62,8 @@ jobs:
           mkdir "$ARCHIVE_BASE"
           cp target/release/lite-anvil "$ARCHIVE_BASE/"
           cp -r data "$ARCHIVE_BASE/"
+          cp resources/linux/com.lite_anvil.LiteAnvil.desktop "$ARCHIVE_BASE/"
+          cp resources/icons/lite-anvil.png "$ARCHIVE_BASE/"
           tar -czf "${ARCHIVE_BASE}.tar.gz" "$ARCHIVE_BASE"
 
       - name: Upload artifact
@@ -114,6 +116,7 @@ jobs:
           New-Item -ItemType Directory -Name $archiveBase
           Copy-Item target\release\lite-anvil.exe "$archiveBase\"
           Copy-Item -Recurse data "$archiveBase\"
+          Copy-Item resources\windows\*.ps1 "$archiveBase\"
           Compress-Archive -Path $archiveBase -DestinationPath "$archiveBase.zip"
 
       - name: Upload artifact
@@ -329,30 +332,7 @@ jobs:
           cp target/x86_64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
           cp -r data LiteAnvil.app/Contents/MacOS/
           bundle_macos_dylibs LiteAnvil.app
-          cat > LiteAnvil.app/Contents/Info.plist << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleName</key>
-              <string>LiteAnvil</string>
-              <key>CFBundleDisplayName</key>
-              <string>Lite-Anvil</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.lite_anvil.LiteAnvil</string>
-              <key>CFBundleVersion</key>
-              <string>${APP_VERSION}</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${APP_VERSION}</string>
-              <key>CFBundleExecutable</key>
-              <string>lite-anvil</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-          </dict>
-          </plist>
-          PLIST
+          sed "s/0\.19\.3/${APP_VERSION}/g" resources/macos/Info.plist > LiteAnvil.app/Contents/Info.plist
           otool -L LiteAnvil.app/Contents/MacOS/lite-anvil
           zip -r "lite-anvil-${APP_VERSION}-macos-x86_64.zip" LiteAnvil.app
 
@@ -532,30 +512,7 @@ jobs:
           cp target/aarch64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
           cp -r data LiteAnvil.app/Contents/MacOS/
           bundle_macos_dylibs LiteAnvil.app
-          cat > LiteAnvil.app/Contents/Info.plist << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleName</key>
-              <string>LiteAnvil</string>
-              <key>CFBundleDisplayName</key>
-              <string>Lite-Anvil</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.lite_anvil.LiteAnvil</string>
-              <key>CFBundleVersion</key>
-              <string>${APP_VERSION}</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${APP_VERSION}</string>
-              <key>CFBundleExecutable</key>
-              <string>lite-anvil</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-          </dict>
-          </plist>
-          PLIST
+          sed "s/0\.19\.3/${APP_VERSION}/g" resources/macos/Info.plist > LiteAnvil.app/Contents/Info.plist
           otool -L LiteAnvil.app/Contents/MacOS/lite-anvil
           zip -r "lite-anvil-${APP_VERSION}-macos-aarch64.zip" LiteAnvil.app
 
