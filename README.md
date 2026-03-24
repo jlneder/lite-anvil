@@ -1,6 +1,6 @@
 # Lite-Anvil
 
-[![CI]](https://github.com/danpozmanter/lite-anvil/actions/workflows/release.yml/badge.svg)
+[![Build](https://github.com/danpozmanter/lite-anvil/actions/workflows/release.yml/badge.svg)](https://github.com/danpozmanter/lite-anvil/actions/workflows/release.yml)
 
 A lightweight code editor built in Rust, with Lua for user plugins.
 
