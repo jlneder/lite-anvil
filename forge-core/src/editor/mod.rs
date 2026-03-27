@@ -1,113 +1,11 @@
-mod affordance_model;
-mod autocomplete;
-mod autoreload;
-mod autorestart;
-mod bracketmatch;
-mod builtin_embeds;
-mod colors;
-mod command;
-mod commands_command;
-mod commands_contextmenu;
-mod commands_core;
-mod commands_dialog;
-mod commands_doc;
-mod commands_files;
-mod commands_findreplace;
-mod commands_git;
-mod commands_log;
-mod commands_root;
-mod commands_statusbar;
-mod commandview;
-mod common;
-mod config;
-mod contextmenu;
-mod detectindent;
+pub(crate) mod commands;
+pub(crate) mod doc;
+pub(crate) mod foundation;
+pub(crate) mod plugins;
+pub(crate) mod ui;
+
 mod dirmonitor;
 mod dirwatch;
-mod doc;
-mod doc_layout;
-mod doc_module;
-mod doc_search;
-mod doc_translate;
-mod docview;
-mod drawwhitespace;
-mod emptyview;
-mod findfile;
-mod folding;
-mod git;
-mod git_view;
-mod gitignore;
-mod highlighter;
-mod ime;
-mod keymap;
-mod keymap_macos;
-mod language_md;
-mod lineguide;
-mod linewrap;
-mod linewrapping;
-mod logview;
-mod lsp_manager;
-mod lsp_plugin_preloads;
-mod lsp_protocol;
-mod lsp_transport;
-mod markdown;
-mod markdown_preview;
-mod minimap;
-mod modkeys_generic;
-mod modkeys_macos;
-mod nagview;
-mod node;
-mod node_model;
-mod object;
-mod picker;
-mod plugin_api;
-mod plugin_macro;
-#[cfg(unix)]
-mod process;
-mod process_lua;
-mod project_fs;
-mod project_lua;
-mod project_manifest;
-mod project_model;
-mod project_search;
-mod projectreplace;
-mod projectsearch;
-mod quote;
-mod reflow;
-mod regex;
-mod regex_lua;
-mod remotessh;
-mod root_model;
-mod rootview;
-mod scale;
-mod scrollbar;
-mod session;
-mod status_model;
-mod statusview;
-mod storage;
-mod storage_lua;
-mod strict;
-mod style;
-mod symbol_index;
-mod syntax;
-mod tabularize;
-#[cfg(unix)]
-mod terminal;
-mod terminal_buffer;
-mod terminal_plugin;
-mod terminal_view;
-mod theme_toggle;
-mod titleview;
-mod tokenizer;
-mod tokenizer_shim;
-mod toolbarview;
-mod tree_model;
-mod treeview;
-mod trimwhitespace;
-mod utf8extra;
-mod utf8string;
-mod view;
-mod workspace;
 
 use mlua::prelude::*;
 use parking_lot::Mutex;
@@ -120,7 +18,7 @@ use std::time::UNIX_EPOCH;
 /// Returns `None` if needle is not a subsequence of haystack.
 /// Returns `Some(score)` otherwise (higher = better match).
 /// When `files=true`, matches backwards for better filename relevance.
-fn fuzzy_match(haystack: &str, needle: &str, files: bool) -> Option<i64> {
+pub(crate) fn fuzzy_match(haystack: &str, needle: &str, files: bool) -> Option<i64> {
     let hb = haystack.as_bytes();
     let nb = needle.as_bytes();
     let h_len = hb.len();
@@ -168,7 +66,7 @@ fn fuzzy_match(haystack: &str, needle: &str, files: bool) -> Option<i64> {
 /// Port of the C `f_path_compare` natural-sort comparison.
 /// Returns `true` if path1 should sort before path2.
 /// Directories sort before files; numeric segments use natural ordering.
-fn path_compare(path1: &str, type1: &str, path2: &str, type2: &str) -> bool {
+pub(crate) fn path_compare(path1: &str, type1: &str, path2: &str, type2: &str) -> bool {
     const SEP: u8 = b'/';
     let p1 = path1.as_bytes();
     let p2 = path2.as_bytes();
@@ -272,85 +170,85 @@ fn path_compare(path1: &str, type1: &str, path2: &str, type2: &str) -> bool {
 pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     let globals = lua.globals();
     let pkg_loaded: LuaTable = globals.get::<LuaTable>("package")?.get("loaded")?;
-    builtin_embeds::register_builtin_preloads(lua)?;
-    config::register_preload(lua)?;
-    style::register_preload(lua)?;
-    syntax::register_preload(lua)?;
-    highlighter::register_preload(lua)?;
-    tokenizer_shim::register_preload(lua)?;
+    foundation::builtin_embeds::register_builtin_preloads(lua)?;
+    foundation::config::register_preload(lua)?;
+    foundation::style::register_preload(lua)?;
+    foundation::syntax::register_preload(lua)?;
+    foundation::highlighter::register_preload(lua)?;
+    foundation::tokenizer_shim::register_preload(lua)?;
     // Core foundation modules (no deps on each other)
-    strict::register_preload(lua)?;
-    utf8string::register_preload(lua)?;
-    object::register_preload(lua)?;
-    common::register_preload(lua)?;
-    regex_lua::register_preload(lua)?;
-    storage_lua::register_preload(lua)?;
+    foundation::strict::register_preload(lua)?;
+    foundation::utf8string::register_preload(lua)?;
+    foundation::object::register_preload(lua)?;
+    foundation::common::register_preload(lua)?;
+    foundation::regex_lua::register_preload(lua)?;
+    foundation::storage_lua::register_preload(lua)?;
     // Core modules that depend on the above
-    modkeys_generic::register_preload(lua)?;
-    modkeys_macos::register_preload(lua)?;
-    keymap_macos::register_preload(lua)?;
-    gitignore::register_preload(lua)?;
+    foundation::modkeys_generic::register_preload(lua)?;
+    foundation::modkeys_macos::register_preload(lua)?;
+    foundation::keymap_macos::register_preload(lua)?;
+    plugins::gitignore::register_preload(lua)?;
     dirwatch::register_preload(lua)?;
-    ime::register_preload(lua)?;
-    process_lua::register_preload(lua)?;
-    command::register_preload(lua)?;
-    keymap::register_preload(lua)?;
-    project_lua::register_preload(lua)?;
-    plugin_api::register_preload(lua)?;
+    foundation::ime::register_preload(lua)?;
+    plugins::process_lua::register_preload(lua)?;
+    foundation::command::register_preload(lua)?;
+    foundation::keymap::register_preload(lua)?;
+    plugins::project_lua::register_preload(lua)?;
+    foundation::plugin_api::register_preload(lua)?;
     // Views
-    view::register_preload(lua)?;
-    scrollbar::register_preload(lua)?;
-    emptyview::register_preload(lua)?;
-    titleview::register_preload(lua)?;
-    commandview::register_preload(lua)?;
-    contextmenu::register_preload(lua)?;
-    nagview::register_preload(lua)?;
-    logview::register_preload(lua)?;
+    ui::view::register_preload(lua)?;
+    ui::scrollbar::register_preload(lua)?;
+    ui::emptyview::register_preload(lua)?;
+    ui::titleview::register_preload(lua)?;
+    ui::commandview::register_preload(lua)?;
+    ui::contextmenu::register_preload(lua)?;
+    ui::nagview::register_preload(lua)?;
+    ui::logview::register_preload(lua)?;
     // Commands
-    commands_command::register_preload(lua)?;
-    commands_contextmenu::register_preload(lua)?;
-    commands_core::register_preload(lua)?;
-    commands_dialog::register_preload(lua)?;
-    commands_files::register_preload(lua)?;
-    commands_findreplace::register_preload(lua)?;
-    commands_log::register_preload(lua)?;
-    commands_root::register_preload(lua)?;
-    commands_statusbar::register_preload(lua)?;
+    commands::commands_command::register_preload(lua)?;
+    commands::commands_contextmenu::register_preload(lua)?;
+    commands::commands_core::register_preload(lua)?;
+    commands::commands_dialog::register_preload(lua)?;
+    commands::commands_files::register_preload(lua)?;
+    commands::commands_findreplace::register_preload(lua)?;
+    commands::commands_log::register_preload(lua)?;
+    commands::commands_root::register_preload(lua)?;
+    commands::commands_statusbar::register_preload(lua)?;
     // Doc subsystem
-    doc_search::register_preload(lua)?;
-    doc_translate::register_preload(lua)?;
-    workspace::register_preload(lua)?;
-    terminal_view::register_preload(lua)?;
-    statusview::register_preload(lua)?;
-    lsp_plugin_preloads::register_preload(lua)?;
-    treeview::register_preload(lua)?;
+    doc::doc_search::register_preload(lua)?;
+    doc::doc_translate::register_preload(lua)?;
+    foundation::workspace::register_preload(lua)?;
+    plugins::terminal_view::register_preload(lua)?;
+    ui::statusview::register_preload(lua)?;
+    plugins::lsp_plugin_preloads::register_preload(lua)?;
+    ui::treeview::register_preload(lua)?;
     // Color themes
-    colors::register_preload(lua)?;
+    foundation::colors::register_preload(lua)?;
     // Bundled plugins fully implemented in Rust — listed in package.native_plugins so
     // core.load_plugins() loads them without requiring a .lua stub file on disk.
-    autocomplete::register_preload(lua)?;
-    autoreload::register_preload(lua)?;
-    autorestart::register_preload(lua)?;
-    bracketmatch::register_preload(lua)?;
-    detectindent::register_preload(lua)?;
-    drawwhitespace::register_preload(lua)?;
-    findfile::register_preload(lua)?;
-    folding::register_preload(lua)?;
-    language_md::register_preload(lua)?;
-    lineguide::register_preload(lua)?;
-    linewrapping::register_preload(lua)?;
-    minimap::register_preload(lua)?;
-    plugin_macro::register_preload(lua)?;
-    projectreplace::register_preload(lua)?;
-    projectsearch::register_preload(lua)?;
-    quote::register_preload(lua)?;
-    reflow::register_preload(lua)?;
-    remotessh::register_preload(lua)?;
-    scale::register_preload(lua)?;
-    tabularize::register_preload(lua)?;
-    theme_toggle::register_preload(lua)?;
-    toolbarview::register_preload(lua)?;
-    trimwhitespace::register_preload(lua)?;
+    plugins::autocomplete::register_preload(lua)?;
+    plugins::autoreload::register_preload(lua)?;
+    plugins::autorestart::register_preload(lua)?;
+    plugins::bracketmatch::register_preload(lua)?;
+    plugins::detectindent::register_preload(lua)?;
+    plugins::drawwhitespace::register_preload(lua)?;
+    plugins::findfile::register_preload(lua)?;
+    plugins::folding::register_preload(lua)?;
+    plugins::language_md::register_preload(lua)?;
+    plugins::lineguide::register_preload(lua)?;
+    plugins::linewrapping::register_preload(lua)?;
+    plugins::minimap::register_preload(lua)?;
+    plugins::plugin_macro::register_preload(lua)?;
+    plugins::projectreplace::register_preload(lua)?;
+    plugins::projectsearch::register_preload(lua)?;
+    plugins::quote::register_preload(lua)?;
+    plugins::reflow::register_preload(lua)?;
+    plugins::remotessh::register_preload(lua)?;
+    plugins::scale::register_preload(lua)?;
+    plugins::tabularize::register_preload(lua)?;
+    plugins::theme_toggle::register_preload(lua)?;
+    ui::toolbarview::register_preload(lua)?;
+    plugins::trimwhitespace::register_preload(lua)?;
     // Advertise fully-Rust plugins so core.load_plugins() loads them without a .lua stub.
     {
         let native_plugins = lua.create_table()?;
@@ -387,15 +285,15 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
             .get::<LuaTable>("package")?
             .set("native_plugins", native_plugins)?;
     }
-    git_view::register_preload(lua)?;
-    commands_git::register_preload(lua)?;
-    terminal_plugin::register_preload(lua)?;
-    markdown_preview::register_preload(lua)?;
-    node::register_preload(lua)?;
-    rootview::register_preload(lua)?;
-    doc_module::register_preload(lua)?;
-    docview::register_preload(lua)?;
-    commands_doc::register_preload(lua)?;
+    plugins::git_view::register_preload(lua)?;
+    commands::commands_git::register_preload(lua)?;
+    plugins::terminal_plugin::register_preload(lua)?;
+    plugins::markdown_preview::register_preload(lua)?;
+    ui::node::register_preload(lua)?;
+    ui::rootview::register_preload(lua)?;
+    doc::doc_module::register_preload(lua)?;
+    doc::docview::register_preload(lua)?;
+    commands::commands_doc::register_preload(lua)?;
 
     let system = make_system(lua)?;
     insert(&globals, &pkg_loaded, "system", system)?;
@@ -406,10 +304,10 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     let terminal = make_terminal(lua)?;
     insert(&globals, &pkg_loaded, "terminal", terminal)?;
 
-    let terminal_buffer = terminal_buffer::make_module(lua)?;
+    let terminal_buffer = plugins::terminal_buffer::make_module(lua)?;
     insert(&globals, &pkg_loaded, "terminal_buffer", terminal_buffer)?;
 
-    let utf8extra = utf8extra::make_module(lua)?;
+    let utf8extra = foundation::utf8extra::make_module(lua)?;
     insert(&globals, &pkg_loaded, "utf8extra", utf8extra)?;
 
     let renderer = make_renderer(lua)?;
@@ -427,64 +325,64 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     let md = make_markdown(lua)?;
     insert(&globals, &pkg_loaded, "markdown", md)?;
 
-    let tokenizer = tokenizer::make_module(lua)?;
+    let tokenizer = foundation::tokenizer::make_module(lua)?;
     insert(&globals, &pkg_loaded, "native_tokenizer", tokenizer)?;
 
-    let project_fs = project_fs::make_module(lua)?;
+    let project_fs = plugins::project_fs::make_module(lua)?;
     insert(&globals, &pkg_loaded, "project_fs", project_fs)?;
 
-    let project_search = project_search::make_module(lua)?;
+    let project_search = plugins::project_search::make_module(lua)?;
     insert(&globals, &pkg_loaded, "project_search", project_search)?;
 
-    let project_manifest = project_manifest::make_module(lua)?;
+    let project_manifest = plugins::project_manifest::make_module(lua)?;
     insert(&globals, &pkg_loaded, "project_manifest", project_manifest)?;
 
-    let project_model = project_model::make_module(lua)?;
+    let project_model = plugins::project_model::make_module(lua)?;
     insert(&globals, &pkg_loaded, "project_model", project_model)?;
 
-    let doc_native = doc::make_module(lua)?;
+    let doc_native = doc::doc::make_module(lua)?;
     insert(&globals, &pkg_loaded, "doc_native", doc_native)?;
 
-    let doc_layout = doc_layout::make_module(lua)?;
+    let doc_layout = doc::doc_layout::make_module(lua)?;
     insert(&globals, &pkg_loaded, "doc_layout", doc_layout)?;
 
-    let affordance_model = affordance_model::make_module(lua)?;
+    let affordance_model = foundation::affordance_model::make_module(lua)?;
     insert(&globals, &pkg_loaded, "affordance_model", affordance_model)?;
 
-    let symbol_index = symbol_index::make_module(lua)?;
+    let symbol_index = doc::symbol_index::make_module(lua)?;
     insert(&globals, &pkg_loaded, "symbol_index", symbol_index)?;
 
-    let git_native = git::make_module(lua)?;
+    let git_native = plugins::git::make_module(lua)?;
     insert(&globals, &pkg_loaded, "git_native", git_native)?;
 
-    let picker = picker::make_module(lua)?;
+    let picker = foundation::picker::make_module(lua)?;
     insert(&globals, &pkg_loaded, "picker", picker)?;
 
-    let status_model = status_model::make_module(lua)?;
+    let status_model = ui::status_model::make_module(lua)?;
     insert(&globals, &pkg_loaded, "status_model", status_model)?;
 
-    let root_model = root_model::make_module(lua)?;
+    let root_model = ui::root_model::make_module(lua)?;
     insert(&globals, &pkg_loaded, "root_model", root_model)?;
 
-    let storage_native = storage::make_module(lua)?;
+    let storage_native = foundation::storage::make_module(lua)?;
     insert(&globals, &pkg_loaded, "storage_native", storage_native)?;
 
-    let session_native = session::make_module(lua)?;
+    let session_native = foundation::session::make_module(lua)?;
     insert(&globals, &pkg_loaded, "session_native", session_native)?;
 
-    let node_model = node_model::make_module(lua)?;
+    let node_model = ui::node_model::make_module(lua)?;
     insert(&globals, &pkg_loaded, "node_model", node_model)?;
 
-    let tree_model = tree_model::make_module(lua)?;
+    let tree_model = ui::tree_model::make_module(lua)?;
     insert(&globals, &pkg_loaded, "tree_model", tree_model)?;
 
-    let lsp_manager = lsp_manager::make_module(lua)?;
+    let lsp_manager = plugins::lsp_manager::make_module(lua)?;
     insert(&globals, &pkg_loaded, "lsp_manager", lsp_manager)?;
 
-    let lsp_protocol = lsp_protocol::make_module(lua)?;
+    let lsp_protocol = plugins::lsp_protocol::make_module(lua)?;
     insert(&globals, &pkg_loaded, "lsp_protocol", lsp_protocol)?;
 
-    let lsp_transport = lsp_transport::make_module(lua)?;
+    let lsp_transport = plugins::lsp_transport::make_module(lua)?;
     insert(&globals, &pkg_loaded, "lsp_transport", lsp_transport)?;
 
     Ok(())
@@ -1246,19 +1144,19 @@ fn make_regex(lua: &Lua) -> LuaResult<LuaTable> {
     let t = lua.create_table()?;
     let slot = Arc::new(Mutex::new(None));
 
-    t.set("ANCHORED", regex::ANCHORED)?;
-    t.set("ENDANCHORED", regex::ENDANCHORED)?;
-    t.set("NOTBOL", regex::NOTBOL)?;
-    t.set("NOTEOL", regex::NOTEOL)?;
-    t.set("NOTEMPTY", regex::NOTEMPTY)?;
-    t.set("NOTEMPTY_ATSTART", regex::NOTEMPTY_ATSTART)?;
+    t.set("ANCHORED", foundation::regex::ANCHORED)?;
+    t.set("ENDANCHORED", foundation::regex::ENDANCHORED)?;
+    t.set("NOTBOL", foundation::regex::NOTBOL)?;
+    t.set("NOTEOL", foundation::regex::NOTEOL)?;
+    t.set("NOTEMPTY", foundation::regex::NOTEMPTY)?;
+    t.set("NOTEMPTY_ATSTART", foundation::regex::NOTEMPTY_ATSTART)?;
 
     let t_key = lua.create_registry_value(t.clone())?;
     let compile_slot = Arc::clone(&slot);
     t.set(
         "compile",
         lua.create_function(move |lua, args: LuaMultiValue| {
-            let module = ensure_lazy_module(lua, &compile_slot, regex::make_module)?;
+            let module = ensure_lazy_module(lua, &compile_slot, foundation::regex::make_module)?;
             let func: LuaFunction = module.get("compile")?;
             let compiled: LuaTable = func.call(args)?;
             let public: LuaTable = lua.registry_value(&t_key)?;
@@ -1268,15 +1166,15 @@ fn make_regex(lua: &Lua) -> LuaResult<LuaTable> {
     )?;
     t.set(
         "cmatch",
-        make_lazy_dispatch(lua, Arc::clone(&slot), regex::make_module, "cmatch")?,
+        make_lazy_dispatch(lua, Arc::clone(&slot), foundation::regex::make_module, "cmatch")?,
     )?;
     t.set(
         "gmatch",
-        make_lazy_dispatch(lua, Arc::clone(&slot), regex::make_module, "gmatch")?,
+        make_lazy_dispatch(lua, Arc::clone(&slot), foundation::regex::make_module, "gmatch")?,
     )?;
     t.set(
         "gsub",
-        make_lazy_dispatch(lua, slot, regex::make_module, "gsub")?,
+        make_lazy_dispatch(lua, slot, foundation::regex::make_module, "gsub")?,
     )?;
 
     Ok(t)
@@ -1287,7 +1185,7 @@ fn make_markdown(lua: &Lua) -> LuaResult<LuaTable> {
     let slot = Arc::new(Mutex::new(None));
     t.set(
         "parse",
-        make_lazy_dispatch(lua, slot, markdown::make_module, "parse")?,
+        make_lazy_dispatch(lua, slot, foundation::markdown::make_module, "parse")?,
     )?;
     Ok(t)
 }
@@ -1395,7 +1293,7 @@ fn make_window_handle(lua: &Lua) -> LuaResult<LuaTable> {
 
 #[cfg(unix)]
 fn make_process(lua: &Lua) -> LuaResult<LuaTable> {
-    process::make_module(lua)
+    plugins::process::make_module(lua)
 }
 
 #[cfg(not(unix))]
@@ -1414,7 +1312,7 @@ fn make_process(lua: &Lua) -> LuaResult<LuaTable> {
 
 #[cfg(unix)]
 fn make_terminal(lua: &Lua) -> LuaResult<LuaTable> {
-    terminal::make_module(lua)
+    plugins::terminal::make_module(lua)
 }
 
 #[cfg(not(unix))]

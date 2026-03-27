@@ -190,9 +190,9 @@ fn read_dir_entries(path: &Path, show_hidden: bool, max_entries: Option<usize>) 
         }
     }
     entries.sort_by(|a, b| {
-        if super::path_compare(&a.name, a.kind.as_str(), &b.name, b.kind.as_str()) {
+        if crate::editor::path_compare(&a.name, a.kind.as_str(), &b.name, b.kind.as_str()) {
             std::cmp::Ordering::Less
-        } else if super::path_compare(&b.name, b.kind.as_str(), &a.name, a.kind.as_str()) {
+        } else if crate::editor::path_compare(&b.name, b.kind.as_str(), &a.name, a.kind.as_str()) {
             std::cmp::Ordering::Greater
         } else {
             std::cmp::Ordering::Equal

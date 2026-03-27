@@ -48,7 +48,7 @@ pub fn run(args: &[String], restarted: bool) -> Result<bool> {
         .map_err(anyhow::Error::from)
         .context("could not create safe Lua VM")?;
 
-    crate::api::register_stubs(&lua)?;
+    crate::editor::register_stubs(&lua)?;
     let runtime = crate::runtime::RuntimeContext::discover()?;
     runtime.configure_lua(&lua, args, restarted)?;
     install_debug_shim(&lua)?;

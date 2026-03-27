@@ -1,4 +1,4 @@
-mod api;
+mod editor;
 mod lua_vm;
 #[cfg(feature = "sdl")]
 mod renderer;

@@ -116,9 +116,9 @@ fn sort_entries(entries: &mut [DirEntry]) {
     entries.sort_by(|a, b| {
         let a_type = if a.is_dir { "dir" } else { "file" };
         let b_type = if b.is_dir { "dir" } else { "file" };
-        if super::path_compare(&a.name, a_type, &b.name, b_type) {
+        if crate::editor::path_compare(&a.name, a_type, &b.name, b_type) {
             std::cmp::Ordering::Less
-        } else if super::path_compare(&b.name, b_type, &a.name, a_type) {
+        } else if crate::editor::path_compare(&b.name, b_type, &a.name, a_type) {
             std::cmp::Ordering::Greater
         } else {
             std::cmp::Ordering::Equal

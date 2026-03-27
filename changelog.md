@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.0.1] - 2026-03-26 — Cursor fix, codebase reorganization.
+
+* Fix cursor up/down always jumping to line start.
+* Codebase reorganization.
+
 ## [1.0.0] - 2026-03-26 1.0.0 Release - stability and performance fixes + minimap, find in selection, unsaved file persistence.
 
 * Find in selection — when a multi-line selection is active and Find is opened, search is limited to the selected region. Toggle with Alt+S. Status bar shows [S] when active.

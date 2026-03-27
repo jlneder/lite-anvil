@@ -543,24 +543,40 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
     }
 
     // translate.previous_line and translate.next_line
+    //
+    // These override the base DocView translators to skip folded regions
+    // while preserving sticky-column behavior via last_x_offset.
     {
         let translate: LuaTable = docview.get("translate")?;
 
         translate.set(
             "previous_line",
             lua.create_function(
-                |lua, (doc, line, _col, dv): (LuaTable, i64, LuaValue, LuaTable)| {
+                |lua, (doc, line, col, dv): (LuaTable, i64, i64, LuaTable)| {
                     let visible = actual_to_visible(lua, &doc, line)?;
                     if visible <= 1 {
                         return Ok((1i64, 1i64));
                     }
                     let target = visible_to_actual(lua, &doc, visible - 1)?;
-                    let last_x: Option<LuaTable> = dv.get("last_x_offset")?;
-                    let offset: f64 = last_x
-                        .and_then(|t| t.get::<Option<f64>>("offset").ok().flatten())
-                        .unwrap_or(0.0);
-                    let col: i64 = dv.call_method("get_x_offset_col", (target, offset))?;
-                    Ok((target, col))
+                    let last_x: LuaTable = match dv.get::<Option<LuaTable>>("last_x_offset")? {
+                        Some(t) => t,
+                        None => {
+                            let t = lua.create_table()?;
+                            dv.set("last_x_offset", t.clone())?;
+                            t
+                        }
+                    };
+                    let xo_line = last_x.get::<Option<i64>>("line")?;
+                    let xo_col = last_x.get::<Option<i64>>("col")?;
+                    if xo_line != Some(line) || xo_col != Some(col) {
+                        let xoff: f64 = dv.call_method("get_col_x_offset", (line, col))?;
+                        last_x.set("offset", xoff)?;
+                    }
+                    let offset: f64 = last_x.get::<Option<f64>>("offset")?.unwrap_or(0.0);
+                    let new_col: i64 = dv.call_method("get_x_offset_col", (target, offset))?;
+                    last_x.set("line", target)?;
+                    last_x.set("col", new_col)?;
+                    Ok((target, new_col))
                 },
             )?,
         )?;
@@ -568,7 +584,7 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
         translate.set(
             "next_line",
             lua.create_function(
-                |lua, (doc, line, _col, dv): (LuaTable, i64, LuaValue, LuaTable)| {
+                |lua, (doc, line, col, dv): (LuaTable, i64, i64, LuaTable)| {
                     let visible = actual_to_visible(lua, &doc, line)?;
                     let vc = visible_line_count(lua, &doc)?;
                     if visible >= vc {
@@ -577,12 +593,25 @@ fn patch_docview_methods(lua: &Lua) -> LuaResult<()> {
                         return Ok((num_lines, i64::MAX));
                     }
                     let target = visible_to_actual(lua, &doc, visible + 1)?;
-                    let last_x: Option<LuaTable> = dv.get("last_x_offset")?;
-                    let offset: f64 = last_x
-                        .and_then(|t| t.get::<Option<f64>>("offset").ok().flatten())
-                        .unwrap_or(0.0);
-                    let col: i64 = dv.call_method("get_x_offset_col", (target, offset))?;
-                    Ok((target, col))
+                    let last_x: LuaTable = match dv.get::<Option<LuaTable>>("last_x_offset")? {
+                        Some(t) => t,
+                        None => {
+                            let t = lua.create_table()?;
+                            dv.set("last_x_offset", t.clone())?;
+                            t
+                        }
+                    };
+                    let xo_line = last_x.get::<Option<i64>>("line")?;
+                    let xo_col = last_x.get::<Option<i64>>("col")?;
+                    if xo_line != Some(line) || xo_col != Some(col) {
+                        let xoff: f64 = dv.call_method("get_col_x_offset", (line, col))?;
+                        last_x.set("offset", xoff)?;
+                    }
+                    let offset: f64 = last_x.get::<Option<f64>>("offset")?.unwrap_or(0.0);
+                    let new_col: i64 = dv.call_method("get_x_offset_col", (target, offset))?;
+                    last_x.set("line", target)?;
+                    last_x.set("col", new_col)?;
+                    Ok((target, new_col))
                 },
             )?,
         )?;

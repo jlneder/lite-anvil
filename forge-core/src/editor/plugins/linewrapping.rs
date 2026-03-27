@@ -23,7 +23,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             if let Some(av) = core.get::<Option<LuaTable>>("active_view")? {
                 if av.get::<Option<LuaTable>>("doc")?.is_some() {
                     av.set("wrapping_enabled", true)?;
-                    super::linewrap::update_docview_breaks(lua, &av)?;
+                    crate::editor::plugins::linewrap::update_docview_breaks(lua, &av)?;
                     save_wrap_preference(lua, true)?;
                 }
             }
@@ -39,7 +39,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
                 if av.get::<Option<LuaTable>>("doc")?.is_some() {
                     av.set("wrapping_enabled", false)?;
                     let font = av.call_method::<LuaValue>("get_font", ())?;
-                    super::linewrap::reconstruct_breaks(lua, &av, &font, f64::INFINITY)?;
+                    crate::editor::plugins::linewrap::reconstruct_breaks(lua, &av, &font, f64::INFINITY)?;
                     save_wrap_preference(lua, false)?;
                 }
             }
@@ -54,7 +54,7 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let command = require_table(lua, "core.command")?;
             if let Some(av) = core.get::<Option<LuaTable>>("active_view")? {
                 if av.get::<Option<LuaTable>>("doc")?.is_some() {
-                    let is_active = super::linewrap::is_active(&av)?;
+                    let is_active = crate::editor::plugins::linewrap::is_active(&av)?;
                     let cmd = if is_active {
                         "line-wrapping:disable"
                     } else {
@@ -90,7 +90,7 @@ fn translate_end_of_line(
             .as_ref()
             .and_then(|d| d.equals(&doc).ok())
             .unwrap_or(false);
-        doc_matches && super::linewrap::is_active(av)?
+        doc_matches && crate::editor::plugins::linewrap::is_active(av)?
     } else {
         false
     };
@@ -100,8 +100,8 @@ fn translate_end_of_line(
     }
 
     let av = active_view.unwrap();
-    let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(&av, line, Some(col), false)?;
-    let (nline, ncol2) = super::linewrap::get_idx_line_col(&av, idx + 1)?;
+    let (idx, _, _, _) = crate::editor::plugins::linewrap::get_line_idx_col_count(&av, line, Some(col), false)?;
+    let (nline, ncol2) = crate::editor::plugins::linewrap::get_idx_line_col(&av, idx + 1)?;
     if nline != line {
         Ok((line, LuaValue::Number(f64::INFINITY)))
     } else {
@@ -122,7 +122,7 @@ fn translate_start_of_line(
             .as_ref()
             .and_then(|d| d.equals(&doc).ok())
             .unwrap_or(false);
-        doc_matches && super::linewrap::is_active(av)?
+        doc_matches && crate::editor::plugins::linewrap::is_active(av)?
     } else {
         false
     };
@@ -132,7 +132,7 @@ fn translate_start_of_line(
     }
 
     let av = active_view.unwrap();
-    let (_, _, _, scol) = super::linewrap::get_line_idx_col_count(&av, line, Some(col), false)?;
+    let (_, _, _, scol) = crate::editor::plugins::linewrap::get_line_idx_col_count(&av, line, Some(col), false)?;
     Ok((line, scol))
 }
 

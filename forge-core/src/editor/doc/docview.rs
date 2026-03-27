@@ -178,8 +178,8 @@ fn docview_get_line_screen_position(
     let (gw, _) = gutter_width_from_method(this)?;
     let mut out = LuaMultiValue::new();
 
-    if super::linewrap::is_active(this)? {
-        let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(this, line, col, false)?;
+    if crate::editor::plugins::linewrap::is_active(this)? {
+        let (idx, _, _, _) = crate::editor::plugins::linewrap::get_line_idx_col_count(this, line, col, false)?;
         y += (idx.saturating_sub(1)) as f64 * lh;
         let col_x = if let Some(col) = col {
             this.call_method::<f64>("get_col_x_offset", (line, col))?
@@ -212,12 +212,12 @@ fn docview_get_visible_line_range(lua: &Lua, this: &LuaTable) -> LuaResult<(usiz
     let _ = x2;
     let lh = docview_get_line_height(lua, this)?;
 
-    if super::linewrap::is_active(this)? {
-        let total = super::linewrap::get_total_wrapped_lines(this)? as f64;
+    if crate::editor::plugins::linewrap::is_active(this)? {
+        let total = crate::editor::plugins::linewrap::get_total_wrapped_lines(this)? as f64;
         let min_idx = (y / lh).floor().max(1.0).min(total) as usize;
         let max_idx = (y2 / lh).floor().max(1.0).min(total) as usize + 1;
-        let (minline, _) = super::linewrap::get_idx_line_col(this, min_idx)?;
-        let (maxline, _) = super::linewrap::get_idx_line_col(this, max_idx.min(total as usize))?;
+        let (minline, _) = crate::editor::plugins::linewrap::get_idx_line_col(this, min_idx)?;
+        let (maxline, _) = crate::editor::plugins::linewrap::get_idx_line_col(this, max_idx.min(total as usize))?;
         return Ok((minline, maxline));
     }
 
@@ -419,13 +419,13 @@ fn translate_previous_line(
     lua: &Lua,
     (_doc, line, col, dv): (LuaTable, usize, usize, LuaTable),
 ) -> LuaResult<(usize, usize)> {
-    if super::linewrap::is_active(&dv)? {
-        let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(&dv, line, Some(col), false)?;
+    if crate::editor::plugins::linewrap::is_active(&dv)? {
+        let (idx, _, _, _) = crate::editor::plugins::linewrap::get_line_idx_col_count(&dv, line, Some(col), false)?;
         if idx <= 1 {
             return Ok((1, 1));
         }
         let xoff: f64 = dv.call_method("get_col_x_offset", (line, col))?;
-        return super::linewrap::get_line_col_from_x(lua, &dv, idx - 1, xoff);
+        return crate::editor::plugins::linewrap::get_line_col_from_x(lua, &dv, idx - 1, xoff);
     }
     if line == 1 {
         Ok((1, 1))
@@ -438,16 +438,16 @@ fn translate_next_line(
     lua: &Lua,
     (doc, line, col, dv): (LuaTable, usize, usize, LuaTable),
 ) -> LuaResult<(usize, usize)> {
-    if super::linewrap::is_active(&dv)? {
-        let total = super::linewrap::get_total_wrapped_lines(&dv)?;
-        let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(&dv, line, Some(col), false)?;
+    if crate::editor::plugins::linewrap::is_active(&dv)? {
+        let total = crate::editor::plugins::linewrap::get_total_wrapped_lines(&dv)?;
+        let (idx, _, _, _) = crate::editor::plugins::linewrap::get_line_idx_col_count(&dv, line, Some(col), false)?;
         if idx >= total {
             let lines = line_count(&doc)?;
             let text = line_text(&doc, lines)?;
             return Ok((lines, text.len()));
         }
         let xoff: f64 = dv.call_method("get_col_x_offset", (line, col))?;
-        return super::linewrap::get_line_col_from_x(lua, &dv, idx + 1, xoff);
+        return crate::editor::plugins::linewrap::get_line_col_from_x(lua, &dv, idx + 1, xoff);
     }
     let lines = line_count(&doc)?;
     if line == lines {
@@ -590,8 +590,8 @@ fn docview_get_filename(lua: &Lua, this: LuaTable) -> LuaResult<String> {
 
 fn docview_get_scrollable_size(lua: &Lua, this: LuaTable) -> LuaResult<f64> {
     let lh = docview_get_line_height(lua, &this)?;
-    if super::linewrap::is_active(&this)? {
-        let total = super::linewrap::get_total_wrapped_lines(&this)? as f64;
+    if crate::editor::plugins::linewrap::is_active(&this)? {
+        let total = crate::editor::plugins::linewrap::get_total_wrapped_lines(&this)? as f64;
         let config = require_table(lua, "core.config")?;
         let scroll_past_end: bool = config.get("scroll_past_end")?;
         if !scroll_past_end {
@@ -658,8 +658,8 @@ fn docview_get_col_x_offset_lua(
     lua: &Lua,
     (this, line, col, line_end): (LuaTable, usize, usize, Option<bool>),
 ) -> LuaResult<f64> {
-    if super::linewrap::is_active(&this)? {
-        return super::linewrap::get_col_x_offset(lua, &this, line, col, line_end.unwrap_or(false));
+    if crate::editor::plugins::linewrap::is_active(&this)? {
+        return crate::editor::plugins::linewrap::get_col_x_offset(lua, &this, line, col, line_end.unwrap_or(false));
     }
     docview_get_col_x_offset(lua, &this, line, col)
 }
@@ -668,9 +668,9 @@ fn docview_get_x_offset_col_lua(
     lua: &Lua,
     (this, line, x): (LuaTable, usize, f64),
 ) -> LuaResult<usize> {
-    if super::linewrap::is_active(&this)? {
-        let (idx, _, _, _) = super::linewrap::get_line_idx_col_count(&this, line, None, false)?;
-        let (_, col) = super::linewrap::get_line_col_from_x(lua, &this, idx, x)?;
+    if crate::editor::plugins::linewrap::is_active(&this)? {
+        let (idx, _, _, _) = crate::editor::plugins::linewrap::get_line_idx_col_count(&this, line, None, false)?;
+        let (_, col) = crate::editor::plugins::linewrap::get_line_col_from_x(lua, &this, idx, x)?;
         return Ok(col);
     }
     docview_get_x_offset_col(lua, &this, line, x)
@@ -683,10 +683,10 @@ fn docview_resolve_screen_position(
     let (ox, oy): (f64, f64) = this.call_method("get_line_screen_position", (1, LuaValue::Nil))?;
     let lh = docview_get_line_height(lua, &this)?;
 
-    if super::linewrap::is_active(&this)? {
-        let total = super::linewrap::get_total_wrapped_lines(&this)?;
+    if crate::editor::plugins::linewrap::is_active(&this)? {
+        let total = crate::editor::plugins::linewrap::get_total_wrapped_lines(&this)?;
         let idx = (((y - oy) / lh).floor() as isize + 1).clamp(1, total as isize) as usize;
-        return super::linewrap::get_line_col_from_x(lua, &this, idx, x - ox);
+        return crate::editor::plugins::linewrap::get_line_col_from_x(lua, &this, idx, x - ox);
     }
 
     let line = (((y - oy) / lh).floor() + 1.0) as usize;
@@ -701,7 +701,7 @@ fn docview_scroll_to_line(
     (this, line, ignore_if_visible, instant): (LuaTable, usize, Option<bool>, Option<bool>),
 ) -> LuaResult<()> {
     if this.get::<bool>("wrapping_enabled").unwrap_or(false) {
-        super::linewrap::update_docview_breaks(lua, &this)?;
+        crate::editor::plugins::linewrap::update_docview_breaks(lua, &this)?;
     }
     let (min, max): (usize, usize) = this.call_method("get_visible_line_range", ())?;
     if !(ignore_if_visible.unwrap_or(false) && line > min && line < max) {
@@ -732,7 +732,7 @@ fn docview_scroll_to_make_visible(
     (this, line, col): (LuaTable, usize, usize),
 ) -> LuaResult<()> {
     if this.get::<bool>("wrapping_enabled").unwrap_or(false) {
-        super::linewrap::update_docview_breaks(lua, &this)?;
+        crate::editor::plugins::linewrap::update_docview_breaks(lua, &this)?;
     }
     let (_, oy): (f64, f64) = this.call_method("get_content_offset", ())?;
     let (_, ly): (f64, f64) = this.call_method("get_line_screen_position", (line, col))?;
@@ -748,7 +748,7 @@ fn docview_scroll_to_make_visible(
     let min_y = ly - oy - size.get::<f64>("y")? + scroll_h + overscroll;
     let max_y = ly - oy - lh;
     to.set("y", clamp(current_to_y, min_y, max_y))?;
-    if super::linewrap::is_active(&this)? {
+    if crate::editor::plugins::linewrap::is_active(&this)? {
         to.set("x", 0.0f64)?;
         return Ok(());
     }
@@ -1008,7 +1008,7 @@ fn docview_update(lua: &Lua, this: LuaTable) -> LuaResult<()> {
     this.call_method::<()>("update_ime_location", ())?;
     update_bracketmatch(lua, &this)?;
     if this.get::<bool>("wrapping_enabled").unwrap_or(false) && size.get::<f64>("x")? > 0.0 {
-        super::linewrap::update_docview_breaks(lua, &this)?;
+        crate::editor::plugins::linewrap::update_docview_breaks(lua, &this)?;
     }
     call_class_method::<()>(lua, "core.view", &this, "update", ())
 }
@@ -1042,9 +1042,9 @@ fn update_bracketmatch(lua: &Lua, this: &LuaTable) -> LuaResult<()> {
     this.set("_bm_col", col1)?;
     this.set("_bm_cid", change_id)?;
     let lines = all_lines(&doc)?;
-    let pair = super::affordance_model::bracket_pair(&lines, line1, col1).or_else(|| {
+    let pair = crate::editor::foundation::affordance_model::bracket_pair(&lines, line1, col1).or_else(|| {
         if col1 > 1 {
-            super::affordance_model::bracket_pair(&lines, line1, col1 - 1)
+            crate::editor::foundation::affordance_model::bracket_pair(&lines, line1, col1 - 1)
         } else {
             None
         }
@@ -1088,7 +1088,7 @@ fn docview_draw_line_text(
     let doc: LuaTable = this.get("doc")?;
     let lh = docview_get_line_height(lua, &this)?;
 
-    if super::linewrap::is_active(&this)? {
+    if crate::editor::plugins::linewrap::is_active(&this)? {
         return docview_draw_line_text_wrapped(lua, &this, &doc, line, x, y, lh);
     }
 
@@ -1154,7 +1154,7 @@ fn docview_draw_line_text_wrapped(
     let begin_width: f64 = offsets.get(line).unwrap_or(0.0);
 
     let (mut vis_idx, _, count, _) =
-        super::linewrap::get_line_idx_col_count(this, line, None, false)?;
+        crate::editor::plugins::linewrap::get_line_idx_col_count(this, line, None, false)?;
     let mut tx = x;
     let mut ty = y + ty_offset;
 
@@ -1187,7 +1187,7 @@ fn docview_draw_line_text_wrapped(
             if token_offset >= text.len() {
                 break;
             }
-            let (next_line, next_col) = super::linewrap::get_idx_line_col(this, vis_idx + 1)?;
+            let (next_line, next_col) = crate::editor::plugins::linewrap::get_idx_line_col(this, vis_idx + 1)?;
             let next_line_start = if next_line != line {
                 let line_text: String = doc.get::<LuaTable>("lines")?.get(line)?;
                 line_text.len()
@@ -1328,10 +1328,10 @@ fn docview_draw_line_body(
     let doc: LuaTable = this.get("doc")?;
     let lh = docview_get_line_height(lua, &this)?;
     let style = require_table(lua, "core.style")?;
-    let is_wrapped = super::linewrap::is_active(&this)?;
+    let is_wrapped = crate::editor::plugins::linewrap::is_active(&this)?;
 
     let (idx0, _, count, _) = if is_wrapped {
-        super::linewrap::get_line_idx_col_count(&this, line, None, false)?
+        crate::editor::plugins::linewrap::get_line_idx_col_count(&this, line, None, false)?
     } else {
         (line, 1, 1, 1)
     };
@@ -1383,9 +1383,9 @@ fn docview_draw_line_body(
 
             if is_wrapped {
                 let (idx1, _, _, _) =
-                    super::linewrap::get_line_idx_col_count(&this, line, Some(col1), false)?;
+                    crate::editor::plugins::linewrap::get_line_idx_col_count(&this, line, Some(col1), false)?;
                 let (idx2, _, _, _) =
-                    super::linewrap::get_line_idx_col_count(&this, line, Some(col2), false)?;
+                    crate::editor::plugins::linewrap::get_line_idx_col_count(&this, line, Some(col2), false)?;
                 let mut start_col_acc = 0usize;
                 for i in idx1..=idx2 {
                     let x1 = if i == idx1 {
@@ -1396,7 +1396,7 @@ fn docview_draw_line_body(
                     let x2 = if i == idx2 {
                         x + this.call_method::<f64>("get_col_x_offset", (line, col2))?
                     } else {
-                        start_col_acc += super::linewrap::get_idx_line_length(&this, i)?;
+                        start_col_acc += crate::editor::plugins::linewrap::get_idx_line_length(&this, i)?;
                         x + this.call_method::<f64>(
                             "get_col_x_offset",
                             (line, start_col_acc + 1, true),
@@ -1483,8 +1483,8 @@ fn docview_draw_line_gutter(
             lh,
         ),
     )?;
-    if super::linewrap::is_active(&this)? {
-        let (_, _, count, _) = super::linewrap::get_line_idx_col_count(&this, line, None, false)?;
+    if crate::editor::plugins::linewrap::is_active(&this)? {
+        let (_, _, count, _) = crate::editor::plugins::linewrap::get_line_idx_col_count(&this, line, None, false)?;
         return Ok(lh * count as f64);
     }
     Ok(lh)
@@ -1642,8 +1642,8 @@ fn docview_draw(lua: &Lua, this: LuaTable) -> LuaResult<()> {
     }
     this.call_method::<()>("draw_overlay", ())?;
     core.call_function::<()>("pop_clip_rect", ())?;
-    if super::linewrap::is_active(&this)? {
-        super::linewrap::draw_guide(lua, &this)?;
+    if crate::editor::plugins::linewrap::is_active(&this)? {
+        crate::editor::plugins::linewrap::draw_guide(lua, &this)?;
     }
     this.call_method::<()>("draw_scrollbar", ())
 }

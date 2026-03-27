@@ -1393,7 +1393,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
             const MAX_LINES: usize = 150;
             const SCORE_THRESHOLD: usize = 2;
             let (detected_type, detected_size, score) =
-                super::affordance_model::detect_indent(&lines, MAX_LINES, default_indent);
+                crate::editor::foundation::affordance_model::detect_indent(&lines, MAX_LINES, default_indent);
             let indent_type = if score >= SCORE_THRESHOLD {
                 detected_type
             } else {

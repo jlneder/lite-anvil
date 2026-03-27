@@ -1511,7 +1511,7 @@ mod tests {
         system.set("get_time", lua.create_function(|_, ()| Ok(0.0))?)?;
         loaded.set("system", system)?;
 
-        let terminal_buffer = crate::api::terminal_buffer::make_module(lua)?;
+        let terminal_buffer = crate::editor::plugins::terminal_buffer::make_module(lua)?;
         loaded.set("terminal_buffer", terminal_buffer)?;
 
         let require = lua.create_function(|lua, name: String| {

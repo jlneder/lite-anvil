@@ -38,7 +38,7 @@ fn rank_strings_inner(
 
     let mut ranked = Vec::new();
     for item in items {
-        if let Some(score) = super::fuzzy_match(&item, &needle, files) {
+        if let Some(score) = crate::editor::fuzzy_match(&item, &needle, files) {
             ranked.push((item, score));
         }
     }
@@ -148,7 +148,7 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 for value in items.sequence_values::<LuaTable>() {
                     let item = value?;
                     let text = item.get::<String>(field.as_str())?;
-                    if let Some(score) = super::fuzzy_match(&text, &needle, files) {
+                    if let Some(score) = crate::editor::fuzzy_match(&text, &needle, files) {
                         ranked.push((item, text, score));
                     }
                 }
