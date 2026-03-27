@@ -294,7 +294,7 @@ fn register_local_helpers(
                     let backup_str = backup_path.to_string_lossy().to_string();
                     let crlf: bool = doc.get::<Option<bool>>("crlf")?.unwrap_or(false);
                     let save_fn: LuaFunction = doc_native.get("buffer_save")?;
-                    let ok: LuaValue = save_fn.call((buf_id, backup_str.clone(), crlf))?;
+                    let ok: LuaValue = save_fn.call((buf_id.clone(), backup_str.clone(), crlf))?;
                     if !matches!(ok, LuaValue::Boolean(true)) {
                         continue;
                     }
@@ -315,6 +315,13 @@ fn register_local_helpers(
                             }
                         }
                     }
+                    // Save undo data alongside backup
+                    let doc_native: LuaTable = get_module(lua, "doc_native")?;
+                    let get_undo: LuaFunction = doc_native.get("buffer_get_undo_data")?;
+                    let undo_data: Vec<u8> = get_undo.call(buf_id.clone())?;
+                    let undo_path = backup_dir.join(format!("backup_{idx}.undo"));
+                    let _ = std::fs::write(&undo_path, &undo_data);
+                    let undo_str = undo_path.to_string_lossy().to_string();
                     let entry = serde_json::json!({
                         "filename": match &filename {
                             LuaValue::String(s) => {
@@ -330,6 +337,7 @@ fn register_local_helpers(
                         },
                         "new_file": new_file,
                         "backup_path": backup_str,
+                        "undo_path": undo_str,
                         "selections": sel_vec,
                         "crlf": crlf,
                     });
@@ -1757,6 +1765,17 @@ fn register_init_fn(
 
                                     doc_t.set("new_file", new_file)?;
                                     doc_t.set("crlf", crlf)?;
+
+                                    // Restore undo data if present
+                                    if let Some(undo_path) = entry.get("undo_path").and_then(|v| v.as_str()) {
+                                        if std::path::Path::new(undo_path).exists() {
+                                            if let Ok(undo_data) = std::fs::read(undo_path) {
+                                                let buf_id: LuaValue = doc_t.get("buffer_id")?;
+                                                let set_undo: LuaFunction = doc_native.get("buffer_set_undo_data")?;
+                                                let _: LuaValue = set_undo.call((buf_id, undo_data))?;
+                                            }
+                                        }
+                                    }
 
                                     // Restore selections.
                                     if let Some(serde_json::Value::Array(sel_arr)) =

@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.0.2] - 2026-03-26 — Persistent undo with 5MB cap.
+
+* Persistent undo history — undo/redo stacks are saved alongside backup files and restored when reopening unsaved/dirty documents. Undo history survives editor restarts.
+* 5MB cap per file on persistent undo storage to prevent excessive disk usage. Older entries are dropped when the cap is exceeded.
+
 ## [1.0.1] - 2026-03-26 — Cursor fix, codebase reorganization.
 
 * Fix cursor up/down always jumping to line start.

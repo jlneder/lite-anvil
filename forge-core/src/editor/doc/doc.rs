@@ -765,6 +765,85 @@ fn clamp_history(history: &mut Vec<Vec<u8>>) {
     }
 }
 
+fn serialize_history(undo: &[Vec<u8>], redo: &[Vec<u8>]) -> Vec<u8> {
+    const PERSISTENT_UNDO_CAP: usize = 5 * 1024 * 1024;
+    let mut total_size = 8usize;
+    let mut undo_entries: Vec<&[u8]> = Vec::new();
+    let mut redo_entries: Vec<&[u8]> = Vec::new();
+
+    for entry in undo.iter().rev() {
+        let entry_size = 4 + entry.len();
+        if total_size + entry_size > PERSISTENT_UNDO_CAP {
+            break;
+        }
+        total_size += entry_size;
+        undo_entries.push(entry);
+    }
+    undo_entries.reverse();
+
+    for entry in redo.iter().rev() {
+        let entry_size = 4 + entry.len();
+        if total_size + entry_size > PERSISTENT_UNDO_CAP {
+            break;
+        }
+        total_size += entry_size;
+        redo_entries.push(entry);
+    }
+    redo_entries.reverse();
+
+    let mut out = Vec::with_capacity(total_size);
+    out.extend_from_slice(&(undo_entries.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(redo_entries.len() as u32).to_le_bytes());
+    for entry in &undo_entries {
+        out.extend_from_slice(&(entry.len() as u32).to_le_bytes());
+        out.extend_from_slice(entry);
+    }
+    for entry in &redo_entries {
+        out.extend_from_slice(&(entry.len() as u32).to_le_bytes());
+        out.extend_from_slice(entry);
+    }
+    out
+}
+
+fn deserialize_history(data: &[u8]) -> Option<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
+    if data.len() < 8 {
+        return None;
+    }
+    let undo_count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let redo_count = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+    let mut undo = Vec::with_capacity(undo_count);
+    let mut redo = Vec::with_capacity(redo_count);
+    let mut pos = 8usize;
+
+    for _ in 0..undo_count {
+        if pos + 4 > data.len() {
+            return None;
+        }
+        let len = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        pos += 4;
+        if pos + len > data.len() {
+            return None;
+        }
+        undo.push(data[pos..pos + len].to_vec());
+        pos += len;
+    }
+
+    for _ in 0..redo_count {
+        if pos + 4 > data.len() {
+            return None;
+        }
+        let len = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        pos += 4;
+        if pos + len > data.len() {
+            return None;
+        }
+        redo.push(data[pos..pos + len].to_vec());
+        pos += len;
+    }
+
+    Some((undo, redo))
+}
+
 fn reset_history(state: &mut BufferState) {
     state.undo.clear();
     state.redo.clear();
@@ -1372,6 +1451,31 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                     apply_record_to_state(state, &record, false)?;
                 }
                 buffer_snapshot(lua, state)
+            })
+        })?,
+    )?;
+
+    module.set(
+        "buffer_get_undo_data",
+        lua.create_function(|_, buffer_id: u64| {
+            with_buffer_mut(buffer_id, |state| {
+                let data = serialize_history(&state.undo, &state.redo);
+                Ok(data)
+            })
+        })?,
+    )?;
+
+    module.set(
+        "buffer_set_undo_data",
+        lua.create_function(|_, (buffer_id, data): (u64, Vec<u8>)| {
+            with_buffer_mut(buffer_id, |state| {
+                if let Some((undo, redo)) = deserialize_history(&data) {
+                    state.undo = undo;
+                    state.redo = redo;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
             })
         })?,
     )?;
