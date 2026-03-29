@@ -2,6 +2,10 @@ use mlua::prelude::*;
 
 use std::sync::Arc;
 
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 fn require_table(lua: &Lua, name: &str) -> LuaResult<LuaTable> {
     let require: LuaFunction = lua.globals().get("require")?;
     require.call(name)
@@ -261,6 +265,18 @@ fn spawn(lua: &Lua, (view, command_argv): (LuaTable, LuaTable)) -> LuaResult<()>
     opts.set("rows", view.get::<LuaValue>("rows")?)?;
     match spawn_fn.call::<LuaAnyUserData>((command_argv, opts)) {
         Ok(handle) => {
+            if let Ok(LuaValue::String(cwd)) = view.get::<LuaValue>("cwd") {
+                if let Ok(cwd_str) = cwd.to_str() {
+                    if !cwd_str.is_empty() {
+                        let cwd_owned = cwd_str.to_owned();
+                        let cd_cmd = format!("cd {} && clear\n", shell_escape(&cwd_owned));
+                        let _ = handle.call_method::<LuaValue>(
+                            "write",
+                            lua.create_string(cd_cmd.as_bytes())?,
+                        );
+                    }
+                }
+            }
             view.set("handle", handle)?;
         }
         Err(err) => {
@@ -1575,3 +1591,4 @@ mod tests {
         }
     }
 }
+

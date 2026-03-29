@@ -1,5 +1,9 @@
 # Change Log
 
+## [1.1.1] - 2026-03-29 — Terminal opens in active file's directory.
+
+* New terminals open in the directory of the currently active tab. Falls back to project root or home for unsaved/untitled files.
+
 ## [1.1.0] - 2026-03-29 — LSP inlay hints.
 
 * LSP inlay hints (type annotations, parameter names) rendered inline with text shifting.

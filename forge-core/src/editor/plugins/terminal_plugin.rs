@@ -180,24 +180,26 @@ fn build_config_defaults(lua: &Lua, scheme_names: &[String]) -> LuaResult<LuaTab
 
 fn get_default_cwd(lua: &Lua) -> LuaResult<String> {
     let core = require_table(lua, "core")?;
-    let av: Option<LuaTable> = core.get("active_view")?;
-    if let Some(view) = av {
-        let doc: Option<LuaTable> = view.get("doc")?;
-        if let Some(doc) = doc {
-            let abs: Option<String> = doc.get("abs_filename")?;
-            if let Some(path) = abs {
-                let common = require_table(lua, "core.common")?;
-                let dir: String = common.call_function("dirname", path)?;
-                return Ok(dir);
+    // Try the active view's doc abs_filename first.
+    if let Ok(Some(view)) = core.get::<Option<LuaTable>>("active_view") {
+        if let Ok(Some(doc)) = view.get::<Option<LuaTable>>("doc") {
+            // Extract abs_filename via LuaValue to handle metamethod edge cases.
+            let abs_val: LuaValue = doc.get("abs_filename").unwrap_or(LuaValue::Nil);
+            if let LuaValue::String(s) = abs_val {
+                if let Ok(path) = s.to_str() {
+                    let path = path.to_owned();
+                    if !path.is_empty() {
+                        let common = require_table(lua, "core.common")?;
+                        let dir: String = common.call_function("dirname", path)?;
+                        return Ok(dir);
+                    }
+                }
             }
         }
     }
-    let root_project: Option<LuaFunction> = core.get("root_project")?;
-    if let Some(f) = root_project {
-        let proj: Option<LuaTable> = f.call(())?;
-        if let Some(p) = proj {
-            let path: Option<String> = p.get("path")?;
-            if let Some(path) = path {
+    if let Ok(Some(f)) = core.get::<Option<LuaFunction>>("root_project") {
+        if let Ok(Some(p)) = f.call::<Option<LuaTable>>(()) {
+            if let Ok(Some(path)) = p.get::<Option<String>>("path") {
                 return Ok(path);
             }
         }
