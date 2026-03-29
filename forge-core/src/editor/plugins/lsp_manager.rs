@@ -22,6 +22,7 @@ struct DocState {
     version: Option<i64>,
     last_diagnostic_version: Option<i64>,
     pending_semantic_at: Option<f64>,
+    pending_inlay_at: Option<f64>,
     pending_change_at: Option<f64>,
 }
 
@@ -37,6 +38,7 @@ struct State {
     diagnostics: HashMap<String, Value>,
     diagnostic_meta: HashMap<String, DiagnosticMeta>,
     docs: HashMap<String, DocState>,
+    inlay_hints: HashMap<String, Value>,
 }
 
 static STATE: Lazy<Mutex<State>> = Lazy::new(|| Mutex::new(State::default()));
@@ -625,6 +627,68 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 }
             }
             Ok(out)
+        })?,
+    )?;
+
+    module.set(
+        "schedule_inlay",
+        lua.create_function(|_, (uri, now, delay): (String, f64, Option<f64>)| {
+            let mut state = STATE.lock();
+            let doc_state = state.docs.entry(uri).or_default();
+            doc_state.pending_inlay_at = Some(now + delay.unwrap_or(0.5));
+            Ok(true)
+        })?,
+    )?;
+
+    module.set(
+        "take_due_inlay",
+        lua.create_function(|lua, now: f64| {
+            let mut state = STATE.lock();
+            let out = lua.create_table()?;
+            let mut idx = 1i64;
+            for (uri, doc_state) in &mut state.docs {
+                if let Some(when) = doc_state.pending_inlay_at {
+                    if when <= now {
+                        doc_state.pending_inlay_at = None;
+                        out.raw_set(idx, uri.as_str())?;
+                        idx += 1;
+                    }
+                }
+            }
+            Ok(out)
+        })?,
+    )?;
+
+    module.set(
+        "store_inlay_hints",
+        lua.create_function(|_, (path, hints): (String, LuaValue)| {
+            let json = lua_to_json(hints)?;
+            STATE.lock().inlay_hints.insert(path, json);
+            Ok(())
+        })?,
+    )?;
+
+    module.set(
+        "get_line_inlay_hints",
+        lua.create_function(|lua, (path, line): (String, i64)| {
+            let state = STATE.lock();
+            if let Some(by_line) = state.inlay_hints.get(&path) {
+                let key = line.to_string();
+                if let Some(hints) = by_line.get(&key) {
+                    if !hints.is_null() {
+                        return json_to_lua(lua, hints);
+                    }
+                }
+            }
+            Ok(LuaValue::Nil)
+        })?,
+    )?;
+
+    module.set(
+        "clear_inlay_hints",
+        lua.create_function(|_, path: String| {
+            STATE.lock().inlay_hints.remove(&path);
+            Ok(())
         })?,
     )?;
 

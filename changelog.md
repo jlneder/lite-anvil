@@ -1,5 +1,9 @@
 # Change Log
 
+## [1.1.0] - 2026-03-29 — LSP inlay hints.
+
+* LSP inlay hints (type annotations, parameter names) rendered inline with text shifting.
+
 ## [1.0.4] - 2026-03-27 — Fix command view typeahead completing on multiple suggestions.
 
 * Fix typeahead completing full word on single character when multiple suggestions exist. Typeahead now only fires when exactly one suggestion matches.

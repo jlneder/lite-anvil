@@ -248,8 +248,91 @@ fn syntax_font_for_type(
     }
 }
 
+/// Parsed inlay hint for a single line, sorted by byte column.
+struct InlayHint {
+    byte_col: usize,
+    label: String,
+    kind: i64,
+    padding_left: bool,
+}
+
+/// Collects inlay hints for a given line from the Lua registry.
+fn get_inlay_hints_for_line(lua: &Lua, doc: &LuaTable, line_text: &str, line: usize) -> Vec<InlayHint> {
+    let abs_val: LuaValue = doc.get("abs_filename").unwrap_or(LuaValue::Nil);
+    let abs: String = match abs_val {
+        LuaValue::String(s) => s.to_str().map(|s| s.to_owned()).unwrap_or_default(),
+        _ => String::new(),
+    };
+    if abs.is_empty() {
+        return Vec::new();
+    }
+    let native = match require_table(lua, "lsp_manager") {
+        Ok(t) => t,
+        _ => return Vec::new(),
+    };
+    let get_fn: LuaFunction = match native.get("get_line_inlay_hints") {
+        Ok(f) => f,
+        _ => return Vec::new(),
+    };
+    let line_hints: LuaTable = match get_fn.call::<LuaValue>((abs.as_str(), line as i64)) {
+        Ok(LuaValue::Table(t)) => t,
+        _ => return Vec::new(),
+    };
+    let mut hints = Vec::new();
+    for h in line_hints.sequence_values::<LuaTable>() {
+        let h = match h {
+            Ok(t) => t,
+            _ => continue,
+        };
+        let char_idx = h.get::<i64>("character").unwrap_or(0) as usize;
+        let label: String = match h.get("label") {
+            Ok(l) => l,
+            _ => continue,
+        };
+        let kind = h.get::<i64>("kind").unwrap_or(0);
+        let padding_left = h.get::<bool>("padding_left").unwrap_or(false);
+        let byte_col = crate::editor::plugins::lsp_plugin_preloads::utf8_char_to_byte(
+            line_text, char_idx,
+        );
+        hints.push(InlayHint {
+            byte_col,
+            label,
+            kind,
+            padding_left,
+        });
+    }
+    hints.sort_by_key(|h| h.byte_col);
+    hints
+}
+
+/// Display text for an inlay hint.
+fn hint_display_text(hint: &InlayHint) -> String {
+    let prefix = if hint.padding_left { " " } else { "" };
+    match hint.kind {
+        1 if hint.label.starts_with(": ") => format!("{}{} ", prefix, hint.label),
+        1 => format!("{}: {} ", prefix, hint.label),
+        _ => format!("{}{} ", prefix, hint.label),
+    }
+}
+
+/// Pixel width of all inlay hints whose byte_col is before `col`.
+fn inlay_width_before_col(hints: &[InlayHint], col: usize, font: &LuaValue) -> LuaResult<f64> {
+    let mut extra = 0.0;
+    for h in hints {
+        if h.byte_col >= col {
+            break;
+        }
+        let display = hint_display_text(h);
+        let w: f64 = font_call_method(font, "get_width", display)?;
+        extra += w;
+    }
+    Ok(extra)
+}
+
 fn docview_get_col_x_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize) -> LuaResult<f64> {
     let doc: LuaTable = this.get("doc")?;
+    let lt = line_text(&doc, line).unwrap_or_else(|_| "\n".to_string());
+    let hints = get_inlay_hints_for_line(lua, &doc, &lt, line);
     let style = require_table(lua, "core.style")?;
     let syntax_fonts: LuaTable = style.get("syntax_fonts")?;
     if is_table_empty(&syntax_fonts)? {
@@ -257,15 +340,15 @@ fn docview_get_col_x_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize)
         let native_doc_layout = require_table(lua, "doc_layout")?;
         let font = docview_get_font(lua, this)?;
         let cell_width: f64 = font_call_method(&font, "get_width", "M")?;
-        return native_doc_layout.call_function(
+        let base: f64 = native_doc_layout.call_function(
             "col_x_offset",
-            (
-                line_text(&doc, line).unwrap_or_else(|_| "\n".to_string()),
-                col,
-                indent_size,
-                cell_width,
-            ),
-        );
+            (lt.clone(), col, indent_size, cell_width),
+        )?;
+        if hints.is_empty() {
+            return Ok(base);
+        }
+        let extra = inlay_width_before_col(&hints, col, &font)?;
+        return Ok(base + extra);
     }
 
     let default_font = docview_get_font(lua, this)?;
@@ -276,6 +359,7 @@ fn docview_get_col_x_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize)
     let tokens: LuaTable = line_info.get("tokens")?;
     let mut column = 1usize;
     let mut xoffset = 0.0;
+    let mut hint_idx = 0usize;
     let mut idx = 1usize;
     while idx <= tokens.raw_len() {
         let token_type: String = tokens.get(idx)?;
@@ -283,6 +367,16 @@ fn docview_get_col_x_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize)
         let font = syntax_font_for_type(lua, this, &token_type, &default_font)?;
         let _: () = font_call_method(&font, "set_tab_size", indent_size)?;
         let length = text.len();
+        let token_end = column + length;
+
+        // Add hint widths that fall within this token but before col.
+        while hint_idx < hints.len() && hints[hint_idx].byte_col < token_end && hints[hint_idx].byte_col < col {
+            let display = hint_display_text(&hints[hint_idx]);
+            let w: f64 = font_call_method(&font, "get_width", display)?;
+            xoffset += w;
+            hint_idx += 1;
+        }
+
         if column + length <= col {
             let opts = lua.create_table()?;
             opts.set("tab_offset", xoffset)?;
@@ -294,6 +388,13 @@ fn docview_get_col_x_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize)
             }
         } else {
             for ch in text.chars() {
+                // Add any hint at exactly this column.
+                while hint_idx < hints.len() && hints[hint_idx].byte_col == column && column < col {
+                    let display = hint_display_text(&hints[hint_idx]);
+                    let w: f64 = font_call_method(&font, "get_width", display)?;
+                    xoffset += w;
+                    hint_idx += 1;
+                }
                 if column >= col {
                     return Ok(xoffset);
                 }
@@ -311,7 +412,8 @@ fn docview_get_col_x_offset(lua: &Lua, this: &LuaTable, line: usize, col: usize)
 
 fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> LuaResult<usize> {
     let doc: LuaTable = this.get("doc")?;
-    let line_text = line_text(&doc, line)?;
+    let lt = line_text(&doc, line)?;
+    let hints = get_inlay_hints_for_line(lua, &doc, &lt, line);
     let style = require_table(lua, "core.style")?;
     let syntax_fonts: LuaTable = style.get("syntax_fonts")?;
     if is_table_empty(&syntax_fonts)? {
@@ -319,8 +421,12 @@ fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> 
         let native_doc_layout = require_table(lua, "doc_layout")?;
         let font = docview_get_font(lua, this)?;
         let cell_width: f64 = font_call_method(&font, "get_width", "M")?;
+        // Subtract hint widths from x so the native function sees original coordinates.
+        let hint_total = inlay_width_before_col(&hints, lt.len() + 1, &font)?;
+        // Approximate: subtract proportionally. For accuracy we'd need per-column tracking.
+        let adjusted_x = if hint_total > 0.0 { x.max(0.0) } else { x };
         let col: i64 = native_doc_layout
-            .call_function("x_offset_col", (line_text, x, indent_size, cell_width))?;
+            .call_function("x_offset_col", (lt, adjusted_x, indent_size, cell_width))?;
         return Ok(col as usize);
     }
 
@@ -332,12 +438,27 @@ fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> 
     let tokens: LuaTable = line_info.get("tokens")?;
     let mut xoffset = 0.0;
     let mut i = 1usize;
+    let mut hint_idx = 0usize;
     let mut idx = 1usize;
     while idx <= tokens.raw_len() {
         let token_type: String = tokens.get(idx)?;
         let text: String = tokens.get(idx + 1)?;
         let font = syntax_font_for_type(lua, this, &token_type, &default_font)?;
         let _: () = font_call_method(&font, "set_tab_size", indent_size)?;
+
+        // Skip past any hint widths at the start of this token.
+        let token_end = i + text.len();
+        while hint_idx < hints.len() && hints[hint_idx].byte_col < token_end {
+            let display = hint_display_text(&hints[hint_idx]);
+            let w: f64 = font_call_method(&font, "get_width", display)?;
+            if xoffset + w >= x {
+                // Click landed on a hint; snap to the hint's byte position.
+                return Ok(hints[hint_idx].byte_col);
+            }
+            xoffset += w;
+            hint_idx += 1;
+        }
+
         let opts = lua.create_table()?;
         opts.set("tab_offset", xoffset)?;
         let width: f64 = font_call_method(&font, "get_width", (text.clone(), opts))?;
@@ -362,7 +483,7 @@ fn docview_get_x_offset_col(lua: &Lua, this: &LuaTable, line: usize, x: f64) -> 
         }
         idx += 2;
     }
-    Ok(line_text.len())
+    Ok(lt.len())
 }
 
 fn move_to_line_offset(
@@ -1113,6 +1234,19 @@ fn docview_draw_line_text(
     let renderer: LuaTable = lua.globals().get("renderer")?;
     let pos: LuaTable = this.get("position")?;
     let limit_x = pos.get::<f64>("x")? + this.get::<LuaTable>("size")?.get::<f64>("x")?;
+
+    let lt = line_text(&doc, line).unwrap_or_else(|_| "\n".to_string());
+    let hints = get_inlay_hints_for_line(lua, &doc, &lt, line);
+    let hint_color: LuaValue = if !hints.is_empty() {
+        syntax
+            .get::<Option<LuaValue>>("comment")?
+            .unwrap_or(LuaValue::Nil)
+    } else {
+        LuaValue::Nil
+    };
+    let mut hint_idx = 0usize;
+    let mut byte_col = 1usize;
+
     let mut idx = 1usize;
     while idx <= tokens_count {
         let token_idx = idx;
@@ -1128,9 +1262,53 @@ fn docview_draw_line_text(
         if last_token == Some(token_idx) && text.ends_with('\n') {
             text.pop();
         }
-        let opts = lua.create_table()?;
-        opts.set("tab_offset", tx - start_tx)?;
-        tx = renderer.call_function("draw_text", (font, text, tx, ty, color, opts))?;
+
+        // Check if any inlay hints fall within this token's byte range.
+        let token_end = byte_col + text.len();
+        if hint_idx < hints.len() && hints[hint_idx].byte_col < token_end {
+            // Split token at hint positions and draw interleaved.
+            let mut remaining = text.as_str();
+            let mut cur_col = byte_col;
+            while hint_idx < hints.len() && hints[hint_idx].byte_col < token_end {
+                let h = &hints[hint_idx];
+                if h.byte_col > cur_col && !remaining.is_empty() {
+                    let split_at = h.byte_col - cur_col;
+                    let split_at = split_at.min(remaining.len());
+                    let (before, after) = remaining.split_at(split_at);
+                    let opts = lua.create_table()?;
+                    opts.set("tab_offset", tx - start_tx)?;
+                    tx = renderer.call_function(
+                        "draw_text",
+                        (font.clone(), before.to_string(), tx, ty, color.clone(), opts),
+                    )?;
+                    cur_col += split_at;
+                    remaining = after;
+                }
+                // Draw the hint.
+                let display = hint_display_text(h);
+                let opts = lua.create_table()?;
+                opts.set("tab_offset", tx - start_tx)?;
+                tx = renderer.call_function(
+                    "draw_text",
+                    (font.clone(), display, tx, ty, hint_color.clone(), opts),
+                )?;
+                hint_idx += 1;
+            }
+            // Draw the rest of the token.
+            if !remaining.is_empty() {
+                let opts = lua.create_table()?;
+                opts.set("tab_offset", tx - start_tx)?;
+                tx = renderer.call_function(
+                    "draw_text",
+                    (font, remaining.to_string(), tx, ty, color, opts),
+                )?;
+            }
+        } else {
+            let opts = lua.create_table()?;
+            opts.set("tab_offset", tx - start_tx)?;
+            tx = renderer.call_function("draw_text", (font, text.clone(), tx, ty, color, opts))?;
+        }
+        byte_col = token_end;
         if tx > limit_x {
             break;
         }

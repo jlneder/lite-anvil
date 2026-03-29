@@ -73,6 +73,11 @@ fn mgr_byte_to_utf8_char(text: &str, col: usize) -> usize {
     text[..end].chars().count()
 }
 
+/// Converts a 0-based UTF-8 character index to a 1-based byte position.
+pub fn utf8_char_to_byte(text: &str, char_idx: usize) -> usize {
+    mgr_utf8_char_to_byte(text, char_idx)
+}
+
 fn mgr_utf8_char_to_byte(text: &str, char_idx: usize) -> usize {
     if char_idx == 0 {
         return 1;
@@ -1244,6 +1249,33 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                             }
                         }
                     }
+                    // Poll inlay hints (errors must not kill the tick loop).
+                    let inlay_result: LuaResult<()> = (|| {
+                        let take_due_inlay: LuaFunction = native.get("take_due_inlay")?;
+                        let req_inlay: LuaFunction = m.get("request_inlay_hints")?;
+                        let due_inlay: LuaTable = match take_due_inlay.call::<LuaValue>(now)? {
+                            LuaValue::Table(t) => t,
+                            _ => return Ok(()),
+                        };
+                        for item in due_inlay.sequence_values::<String>() {
+                            let uri = item?;
+                            let doc_state: LuaTable = m.get("doc_state")?;
+                            for pair in doc_state.pairs::<LuaValue, LuaTable>() {
+                                let (doc_val, state) = pair?;
+                                let state_uri: LuaValue = state.get("uri")?;
+                                if let LuaValue::String(s) = state_uri {
+                                    if s.to_str()? == uri {
+                                        req_inlay.call::<()>(doc_val)?;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Ok(())
+                    })();
+                    if let Err(e) = inlay_result {
+                        let _ = e;
+                    }
                     Ok(0.1f64)
                 })?;
                 // Lua function: loops and yields — only Lua functions may yield in Lua 5.4.
@@ -1471,6 +1503,9 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                     sem.set("overlappingTokenSupport", false)?;
                     sem.set("multilineTokenSupport", true)?;
                     td.set("semanticTokens", sem)?;
+                    let inlay = lua.create_table()?;
+                    inlay.set("dynamicRegistration", false)?;
+                    td.set("inlayHint", inlay)?;
                     caps.set("textDocument", td)?;
                 }
                 {
@@ -1623,6 +1658,188 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
         )?;
     }
 
+    // ── request_inlay_hints ─────────────────────────────────────────────────────
+    {
+        let mk = Arc::clone(&mgr_key);
+        mgr.set(
+            "request_inlay_hints",
+            lua.create_function(move |lua, doc: LuaTable| {
+                let m: LuaTable = lua.registry_value(&mk)?;
+                let doc_state: LuaTable = m.get("doc_state")?;
+                let state: LuaValue = doc_state.get(doc.clone())?;
+                let state = match state {
+                    LuaValue::Table(t) => t,
+                    _ => return Ok(()),
+                };
+                if state
+                    .get::<bool>("inlay_request_in_flight")
+                    .unwrap_or(false)
+                {
+                    return Ok(());
+                }
+                let client: LuaValue = state.get("client")?;
+                let client = match client {
+                    LuaValue::Table(t) => t,
+                    _ => return Ok(()),
+                };
+                if !client.get::<bool>("is_initialized").unwrap_or(false) {
+                    m.get::<LuaFunction>("schedule_inlay_refresh")?
+                        .call::<()>((doc, 1.0f64))?;
+                    return Ok(());
+                }
+                let caps: LuaValue = client.get("capabilities")?;
+                let has_inlay = match caps {
+                    LuaValue::Table(c) => {
+                        !matches!(c.get::<LuaValue>("inlayHintProvider")?, LuaValue::Nil | LuaValue::Boolean(false))
+                    }
+                    _ => false,
+                };
+                if !has_inlay {
+                    return Ok(());
+                }
+                state.set("inlay_request_in_flight", true)?;
+                let uri: String = state.get("uri")?;
+                let mk2 = Arc::clone(&mk);
+                let doc2 = doc.clone();
+                let cb = lua.create_function(move |lua, (result, err): (LuaValue, LuaValue)| {
+                    let m: LuaTable = lua.registry_value(&mk2)?;
+                    let doc_state: LuaTable = m.get("doc_state")?;
+                    if let Ok(LuaValue::Table(st)) = doc_state.get::<LuaValue>(doc2.clone()) {
+                        st.set("inlay_request_in_flight", false)?;
+                    }
+                    if !matches!(err, LuaValue::Nil) {
+                        if let LuaValue::Table(ref et) = err {
+                            let code = et.get::<i64>("code").unwrap_or(0);
+                            if code == -32801 {
+                                m.get::<LuaFunction>("schedule_inlay_refresh")?
+                                    .call::<()>((doc2.clone(), 2.0f64))?;
+                                return Ok(());
+                            }
+                        }
+                        return Ok(());
+                    }
+                    let hints = match result {
+                        LuaValue::Table(t) => t,
+                        _ => return Ok(()),
+                    };
+                    // Store hints indexed by 1-based line number.
+                    let by_line = lua.create_table()?;
+                    for hint_val in hints.sequence_values::<LuaTable>() {
+                        let hint = hint_val?;
+                        let position: LuaTable = hint.get("position")?;
+                        let lsp_line: i64 = position.get::<i64>("line").unwrap_or(0);
+                        let line = lsp_line + 1;
+                        let char_idx: i64 = position.get::<i64>("character").unwrap_or(0);
+                        let label_val: LuaValue = hint.get("label")?;
+                        let label = match label_val {
+                            LuaValue::String(s) => s.to_str()?.to_owned(),
+                            LuaValue::Table(parts) => {
+                                let mut buf = String::new();
+                                for part in parts.sequence_values::<LuaValue>() {
+                                    match part? {
+                                        LuaValue::String(s) => {
+                                            let text = s.to_str()?.to_owned();
+                                            buf.push_str(&text);
+                                        }
+                                        LuaValue::Table(t) => {
+                                            if let Ok(v) = t.get::<String>("value") {
+                                                buf.push_str(&v);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                buf
+                            }
+                            _ => continue,
+                        };
+                        let kind: i64 = hint.get::<i64>("kind").unwrap_or(0);
+                        let pad_left: bool = hint.get::<bool>("paddingLeft").unwrap_or(false);
+                        let pad_right: bool = hint.get::<bool>("paddingRight").unwrap_or(false);
+                        let entry = lua.create_table()?;
+                        entry.set("character", char_idx)?;
+                        entry.set("label", label)?;
+                        entry.set("kind", kind)?;
+                        entry.set("padding_left", pad_left)?;
+                        entry.set("padding_right", pad_right)?;
+                        let line_hints: LuaTable = match by_line.get::<LuaValue>(line)? {
+                            LuaValue::Table(t) => t,
+                            _ => {
+                                let t = lua.create_table()?;
+                                by_line.set(line, t.clone())?;
+                                t
+                            }
+                        };
+                        line_hints.raw_set(line_hints.raw_len() + 1, entry)?;
+                    }
+                    let abs: String = doc2.get("abs_filename")?;
+                    // Convert integer line keys to strings for JSON serialization.
+                    let str_keyed = lua.create_table()?;
+                    for pair in by_line.pairs::<i64, LuaValue>() {
+                        let (k, v) = pair?;
+                        str_keyed.set(k.to_string(), v)?;
+                    }
+                    let native: LuaTable = req(lua, "lsp_manager")?;
+                    native.get::<LuaFunction>("store_inlay_hints")?
+                        .call::<()>((abs, str_keyed))?;
+                    let core: LuaTable = req(lua, "core")?;
+                    core.set("redraw", true)?;
+                    Ok(())
+                })?;
+                // Build range covering the whole document.
+                let lines: LuaTable = doc.get("lines")?;
+                let line_count = lines.len()? as i64;
+                let start = lua.create_table()?;
+                start.set("line", 0)?;
+                start.set("character", 0)?;
+                let end = lua.create_table()?;
+                // LSP lines are 0-indexed; last valid line = line_count - 1.
+                end.set("line", line_count - 1)?;
+                end.set("character", 0)?;
+                let range = lua.create_table()?;
+                range.set("start", start)?;
+                range.set("end", end)?;
+                let td = lua.create_table()?;
+                td.set("uri", uri)?;
+                let params = lua.create_table()?;
+                params.set("textDocument", td)?;
+                params.set("range", range)?;
+                client.get::<LuaFunction>("request")?.call::<()>((
+                    client,
+                    "textDocument/inlayHint",
+                    params,
+                    cb,
+                ))
+            })?,
+        )?;
+    }
+
+    // ── schedule_inlay_refresh ─────────────────────────────────────────────────
+    {
+        let mk = Arc::clone(&mgr_key);
+        mgr.set(
+            "schedule_inlay_refresh",
+            lua.create_function(move |lua, (doc, delay): (LuaTable, Option<f64>)| {
+                let m: LuaTable = lua.registry_value(&mk)?;
+                let doc_state: LuaTable = m.get("doc_state")?;
+                let state: LuaValue = doc_state.get(doc)?;
+                let state = match state {
+                    LuaValue::Table(t) => t,
+                    _ => return Ok(()),
+                };
+                let uri: String = state.get("uri")?;
+                let system: LuaTable = lua.globals().get("system")?;
+                let now: f64 = system.get::<LuaFunction>("get_time")?.call(())?;
+                let native: LuaTable = req(lua, "lsp_manager")?;
+                native.get::<LuaFunction>("schedule_inlay")?.call::<()>((
+                    uri,
+                    now,
+                    delay.unwrap_or(0.5),
+                ))
+            })?,
+        )?;
+    }
+
     // ── schedule_semantic_refresh ──────────────────────────────────────────────
     {
         let mk = Arc::clone(&mgr_key);
@@ -1709,6 +1926,8 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                     params,
                     LuaValue::Nil,
                 ))?;
+                m.get::<LuaFunction>("schedule_inlay_refresh")?
+                    .call::<()>((doc, 0.5f64))?;
                 Ok(LuaValue::Table(client))
             })?,
         )?;
@@ -1759,7 +1978,9 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                     LuaValue::Nil,
                 ))?;
                 m.get::<LuaFunction>("schedule_semantic_refresh")?
-                    .call::<()>((doc, 0.35f64))?;
+                    .call::<()>((doc.clone(), 0.35f64))?;
+                m.get::<LuaFunction>("schedule_inlay_refresh")?
+                    .call::<()>((doc, 0.5f64))?;
                 let core: LuaTable = req(lua, "core")?;
                 core.set("redraw", true)
             })?,
@@ -1889,7 +2110,9 @@ fn init_manager_module(lua: &Lua) -> LuaResult<LuaValue> {
                     LuaValue::Nil,
                 ))?;
                 m.get::<LuaFunction>("schedule_semantic_refresh")?
-                    .call::<()>((doc, 0.1f64))?;
+                    .call::<()>((doc.clone(), 0.1f64))?;
+                m.get::<LuaFunction>("schedule_inlay_refresh")?
+                    .call::<()>((doc, 0.2f64))?;
                 let core: LuaTable = req(lua, "core")?;
                 core.set("redraw", true)
             })?,
@@ -5127,6 +5350,14 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 let large = self_.get::<bool>("large_file_mode").unwrap_or(false);
                 if has_abs && !large {
                     let m: LuaTable = lua.registry_value(&mk)?;
+                    // Clear stale inlay hints so they don't render at wrong positions.
+                    if let Ok(abs) = self_.get::<String>("abs_filename") {
+                        if let Ok(native) = req(lua, "lsp_manager") {
+                            if let Ok(f) = native.get::<LuaFunction>("clear_inlay_hints") {
+                                let _ = f.call::<()>(abs);
+                            }
+                        }
+                    }
                     m.get::<LuaFunction>("on_doc_change")?.call::<()>(self_)?;
                 }
                 Ok(())
@@ -5252,6 +5483,134 @@ fn init_lsp_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     old.call((self_, button, x as i64, y as i64, clicks))
                 },
             )?,
+        )?;
+    }
+
+    // Patch DocView.draw_line_text — inject inlay hints inline with text shifting.
+    {
+        let docview: LuaTable = req(lua, "core.docview")?;
+        let old_fn: LuaFunction = docview.get("draw_line_text")?;
+        let old_key = Arc::new(lua.create_registry_value(old_fn)?);
+        docview.set(
+            "draw_line_text",
+            lua.create_function(move |lua, (self_, line, x, y): (LuaTable, i64, f64, f64)| {
+                let old: LuaFunction = lua.registry_value(&old_key)?;
+                // Check if this doc has inlay hints for this line.
+                let doc: LuaTable = self_.get("doc")?;
+                let abs: String = match doc.get::<LuaValue>("abs_filename") {
+                    Ok(LuaValue::String(s)) => s.to_str().map(|s| s.to_owned()).unwrap_or_default(),
+                    _ => String::new(),
+                };
+                if abs.is_empty() {
+                    return old.call((self_, line, x, y));
+                }
+                let native: LuaTable = req(lua, "lsp_manager")?;
+                let get_fn: LuaFunction = native.get("get_line_inlay_hints")?;
+                let hints_val: LuaValue = get_fn.call((abs.as_str(), line))?;
+                let hints = match hints_val {
+                    LuaValue::Table(t) if t.raw_len() > 0 => t,
+                    _ => return old.call((self_, line, x, y)),
+                };
+                // This line has hints — render tokens with hint injection.
+                let lh: f64 = self_.call_method("get_line_height", ())?;
+                let ty_off: f64 = self_.call_method("get_line_text_y_offset", ())?;
+                let ty = y + ty_off;
+                let style: LuaTable = req(lua, "core.style")?;
+                let syntax: LuaTable = style.get("syntax")?;
+                let hint_color: LuaValue = syntax
+                    .get::<LuaValue>("comment")
+                    .unwrap_or(LuaValue::Nil);
+                let font: LuaTable = self_.call_method("get_font", ())?;
+                let highlighter: LuaTable = doc.get("highlighter")?;
+                let line_info: LuaTable = highlighter.call_method("get_line", line)?;
+                let tokens: LuaTable = line_info.get("tokens")?;
+                let tokens_count = tokens.raw_len() as i64;
+                let renderer: LuaTable = lua.globals().get("renderer")?;
+                let draw_text_fn: LuaFunction = renderer.get("draw_text")?;
+                // Build hint list sorted by byte column.
+                let line_text: String = doc.get::<LuaTable>("lines")?
+                    .get::<String>(line).unwrap_or_else(|_| "\n".to_owned());
+                let mut hint_list: Vec<(usize, String)> = Vec::new();
+                for h in hints.sequence_values::<LuaTable>() {
+                    let h = h?;
+                    let char_idx = h.get::<i64>("character").unwrap_or(0) as usize;
+                    let label: String = h.get("label")?;
+                    let kind = h.get::<i64>("kind").unwrap_or(0);
+                    let pad_left = h.get::<bool>("padding_left").unwrap_or(false);
+                    let byte_col = mgr_utf8_char_to_byte(&line_text, char_idx);
+                    let prefix = if pad_left { " " } else { "" };
+                    let display = match kind {
+                        1 if label.starts_with(": ") => format!("{}{} ", prefix, label),
+                        1 => format!("{}: {} ", prefix, label),
+                        _ => format!("{}{} ", prefix, label),
+                    };
+                    hint_list.push((byte_col, display));
+                }
+                hint_list.sort_by_key(|h| h.0);
+                let mut tx = x;
+                let start_tx = x;
+                let mut byte_col = 1usize;
+                let mut hint_idx = 0usize;
+                let mut last_token = None;
+                if tokens_count > 0 {
+                    let last_text: String = tokens.get(tokens_count)?;
+                    if last_text.ends_with('\n') {
+                        last_token = Some(tokens_count - 1);
+                    }
+                }
+                let mut idx = 1i64;
+                while idx <= tokens_count {
+                    let token_type: String = tokens.get(idx)?;
+                    let mut text: String = tokens.get(idx + 1)?;
+                    let color = syntax
+                        .get::<LuaValue>(token_type.as_str())
+                        .unwrap_or(syntax.get("normal").unwrap_or(LuaValue::Nil));
+                    if last_token == Some(idx) && text.ends_with('\n') {
+                        text.pop();
+                    }
+                    let token_end = byte_col + text.len();
+                    // Draw any hints that fall within this token.
+                    if hint_idx < hint_list.len() && hint_list[hint_idx].0 < token_end {
+                        let mut remaining = text.as_str();
+                        let mut cur_col = byte_col;
+                        while hint_idx < hint_list.len() && hint_list[hint_idx].0 < token_end {
+                            let (hcol, ref display) = hint_list[hint_idx];
+                            if hcol > cur_col && !remaining.is_empty() {
+                                let split_at = (hcol - cur_col).min(remaining.len());
+                                let (before, after) = remaining.split_at(split_at);
+                                let opts = lua.create_table()?;
+                                opts.set("tab_offset", tx - start_tx)?;
+                                tx = draw_text_fn.call((
+                                    font.clone(), before.to_owned(), tx, ty, color.clone(), opts,
+                                ))?;
+                                cur_col += split_at;
+                                remaining = after;
+                            }
+                            // Draw the hint text.
+                            let opts = lua.create_table()?;
+                            opts.set("tab_offset", tx - start_tx)?;
+                            tx = draw_text_fn.call((
+                                font.clone(), display.clone(), tx, ty, hint_color.clone(), opts,
+                            ))?;
+                            hint_idx += 1;
+                        }
+                        if !remaining.is_empty() {
+                            let opts = lua.create_table()?;
+                            opts.set("tab_offset", tx - start_tx)?;
+                            tx = draw_text_fn.call((
+                                font.clone(), remaining.to_owned(), tx, ty, color, opts,
+                            ))?;
+                        }
+                    } else {
+                        let opts = lua.create_table()?;
+                        opts.set("tab_offset", tx - start_tx)?;
+                        tx = draw_text_fn.call((font.clone(), text.clone(), tx, ty, color, opts))?;
+                    }
+                    byte_col = token_end;
+                    idx += 2;
+                }
+                Ok(lh)
+            })?,
         )?;
     }
 
