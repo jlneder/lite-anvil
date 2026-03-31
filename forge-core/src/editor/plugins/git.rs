@@ -734,7 +734,13 @@ pub fn make_module(lua: &Lua) -> LuaResult<LuaTable> {
                 let mut commands = COMMANDS.lock();
                 match commands.get(&handle) {
                     None | Some(None) => return Ok(LuaValue::Nil),
-                    Some(Some(_)) => commands.remove(&handle).unwrap().unwrap(),
+                    Some(Some(_)) => {
+                        // Proven `Some(Some(_))` by the match guard above.
+                        let Some(Some(val)) = commands.remove(&handle) else {
+                            unreachable!()
+                        };
+                        val
+                    }
                 }
             };
             let t = lua.create_table()?;

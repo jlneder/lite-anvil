@@ -214,7 +214,7 @@ fn cut_or_copy(lua: &Lua, delete: bool) -> LuaResult<()> {
         } else {
             let lines: LuaTable = doc.get("lines")?;
             let line = lines.get::<String>(line1)?;
-            let text = line[..line.len().saturating_sub(1)].to_string();
+            let text = line.strip_suffix('\n').unwrap_or(&line).to_string();
             whole_line.set(idx, true)?;
             if delete {
                 let lines_len = lines.raw_len();

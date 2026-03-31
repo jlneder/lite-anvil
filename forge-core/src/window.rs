@@ -587,7 +587,6 @@ pub enum LuaEventVal {
     String(String),
     Int(i64),
     Float(f64),
-    #[allow(dead_code)]
     Bool(bool),
 }
 

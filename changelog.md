@@ -1,5 +1,13 @@
 # Change Log
 
+## [1.3.1] - 2026-03-31 — Bug fixes and dead code cleanup.
+
+* Fix panic on truncated multi-byte UTF-8 sequences in the renderer text cache.
+* Fix byte-level string truncation when copying whole lines without a trailing newline.
+* Remove no-op `width -= 0.0` in tab width calculation.
+* Remove erroneous `#[allow(dead_code)]` on `LuaEventVal::Bool` (variant is used).
+* Clean up fragile unwrap patterns in linewrapping and git command checking.
+
 ## [1.3.0] - 2026-03-31 — Multi-tab terminal, breadcrumbs, LSP hierarchy, test runner, and file watching.
 
 * Multi-tab terminal: navigate between terminal tabs with Ctrl+Alt+Left/Right, jump by number with Ctrl+Alt+1-9, and list all terminals with Ctrl+Alt+T.

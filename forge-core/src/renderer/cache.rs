@@ -559,23 +559,17 @@ fn get_group_glyph(fonts: &[FontRef], codepoint: u32) -> (GlyphInfo, i32) {
 
 /// Decode the next UTF-8 codepoint from `bytes` starting at `*pos`.
 fn next_char(bytes: &[u8], pos: &mut usize) -> char {
-    let b = bytes[*pos];
+    let idx = *pos;
+    let b = bytes[idx];
+    let byte = |offset| bytes.get(idx + offset).copied().unwrap_or(0) as u32 & 0x3F;
     let (cp, len) = if b < 0x80 {
         (b as u32, 1)
     } else if b < 0xE0 {
-        let cp = ((b as u32 & 0x1F) << 6) | (bytes[*pos + 1] as u32 & 0x3F);
-        (cp, 2)
+        (((b as u32 & 0x1F) << 6) | byte(1), 2)
     } else if b < 0xF0 {
-        let cp = ((b as u32 & 0x0F) << 12)
-            | ((bytes[*pos + 1] as u32 & 0x3F) << 6)
-            | (bytes[*pos + 2] as u32 & 0x3F);
-        (cp, 3)
+        (((b as u32 & 0x0F) << 12) | (byte(1) << 6) | byte(2), 3)
     } else {
-        let cp = ((b as u32 & 0x07) << 18)
-            | ((bytes[*pos + 1] as u32 & 0x3F) << 12)
-            | ((bytes[*pos + 2] as u32 & 0x3F) << 6)
-            | (bytes[*pos + 3] as u32 & 0x3F);
-        (cp, 4)
+        (((b as u32 & 0x07) << 18) | (byte(1) << 12) | (byte(2) << 6) | byte(3), 4)
     };
     *pos += len;
     char::from_u32(cp).unwrap_or('\u{FFFD}')

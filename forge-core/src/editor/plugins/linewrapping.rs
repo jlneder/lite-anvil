@@ -95,11 +95,10 @@ fn translate_end_of_line(
         false
     };
 
-    if !wrap_active {
+    let Some(av) = active_view.filter(|_| wrap_active) else {
         return Ok((line, LuaValue::Number(f64::INFINITY)));
-    }
+    };
 
-    let av = active_view.unwrap();
     let (idx, _, _, _) = crate::editor::plugins::linewrap::get_line_idx_col_count(&av, line, Some(col), false)?;
     let (nline, ncol2) = crate::editor::plugins::linewrap::get_idx_line_col(&av, idx + 1)?;
     if nline != line {
@@ -127,11 +126,9 @@ fn translate_start_of_line(
         false
     };
 
-    if !wrap_active {
+    let Some(av) = active_view.filter(|_| wrap_active) else {
         return Ok((line, 1));
-    }
-
-    let av = active_view.unwrap();
+    };
     let (_, _, _, scol) = crate::editor::plugins::linewrap::get_line_idx_col_count(&av, line, Some(col), false)?;
     Ok((line, scol))
 }

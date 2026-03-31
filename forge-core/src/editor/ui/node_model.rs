@@ -108,10 +108,7 @@ fn target_tab_width(
     tab_width: f64,
 ) -> f64 {
     let visible = visible_tabs(view_count, tab_offset, max_tabs).max(1) as f64;
-    let mut width = size_x.max(1.0);
-    if view_count > visible as usize {
-        width -= 0.0;
-    }
+    let width = size_x.max(1.0);
     let min_width = width / (max_tabs.max(1) as f64);
     let max_width = width / visible;
     tab_width.clamp(min_width, max_width)
