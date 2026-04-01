@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.3.5] - 2026-04-01 — Removing legacy files.
+
+* Removed `scripts/fontello-config.json` - no longer needed (project uses PNG icons instead of font icons).
+* Removed `scripts/keymap-generator/` - obsolete SDL-based keymap generator incompatible with winit input system.
+
 ## [1.3.4] - 2026-04-01 — Syntax highlighting fix for multi-byte characters, code quality, stability, and style fixes.
 
 * Fix syntax highlighting breaking after multi-byte UTF-8 characters (e.g. arrows, emoji).
