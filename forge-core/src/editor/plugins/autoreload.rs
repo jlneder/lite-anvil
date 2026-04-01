@@ -417,27 +417,33 @@ fn patch_node_set_active_view(lua: &Lua, state_key: Arc<LuaRegistryKey>) -> LuaR
             old.call::<()>((this, view.clone()))?;
             let doc: Option<LuaTable> = view.get("doc")?;
             doc_changes_visibility(lua, doc.clone(), true, &state, sk.clone())?;
-            // Persist active file (skip during exit teardown and non-doc views).
+            // Persist active file -- only during normal use (user switching
+            // tabs). Skip during exit teardown and session restore so the
+            // on-disk value is never overwritten with intermediate state.
             let core_t = require_table(lua, "core")?;
-            let quitting = matches!(core_t.get::<LuaValue>("_exiting")?, LuaValue::Boolean(true));
-            if !quitting {
+            let skip_write =
+                matches!(core_t.get::<LuaValue>("_exiting")?, LuaValue::Boolean(true))
+                    || matches!(
+                        core_t.get::<LuaValue>("_restoring_session")?,
+                        LuaValue::Boolean(true)
+                    );
+            if !skip_write {
                 if let Some(ref d) = doc {
-                    let userdir: String = lua.globals().get("USERDIR")?;
-                    let dir = std::path::PathBuf::from(&userdir)
-                        .join("storage")
-                        .join("session");
-                    if let Err(e) = std::fs::create_dir_all(&dir) {
-                        log::warn!("failed to create session dir: {e}");
-                    }
-                    let content = if let LuaValue::String(s) =
-                        d.get::<LuaValue>("abs_filename")?
-                    {
-                        format!("\"{}\"", s.to_str()?)
-                    } else {
-                        String::new()
-                    };
-                    if let Err(e) = std::fs::write(dir.join("active_file"), &content) {
-                        log::warn!("failed to write active_file: {e}");
+                    let abs: LuaValue = d.get::<LuaValue>("abs_filename")?;
+                    if let LuaValue::String(s) = abs {
+                        let path_str = s.to_str()?;
+                        log::info!("autoreload: persist active_file -> {path_str}");
+                        let userdir: String = lua.globals().get("USERDIR")?;
+                        let dir = std::path::PathBuf::from(&userdir)
+                            .join("storage")
+                            .join("session");
+                        if let Err(e) = std::fs::create_dir_all(&dir) {
+                            log::warn!("failed to create session dir: {e}");
+                        }
+                        let content = format!("\"{path_str}\"");
+                        if let Err(e) = std::fs::write(dir.join("active_file"), &content) {
+                            log::warn!("failed to write active_file: {e}");
+                        }
                     }
                 }
             }

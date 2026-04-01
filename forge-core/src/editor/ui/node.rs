@@ -535,6 +535,20 @@ pub fn register_preload(lua: &Lua) -> LuaResult<()> {
                             "Tried to set active view on non-leaf node",
                         ));
                     }
+                    let doc_name = if let LuaValue::Table(ref v) = view {
+                        v.get::<Option<LuaTable>>("doc")
+                            .ok()
+                            .flatten()
+                            .and_then(|d| {
+                                d.get::<Option<String>>("abs_filename").ok().flatten()
+                            })
+                    } else {
+                        None
+                    };
+                    log::info!(
+                        "node.set_active_view -> {}",
+                        doc_name.as_deref().unwrap_or("<no file>")
+                    );
                     let last_active: LuaValue = this.get("active_view")?;
                     this.set("active_view", view.clone())?;
                     let core: LuaTable = require_table(lua, "core")?;

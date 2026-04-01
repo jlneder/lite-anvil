@@ -6,6 +6,70 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::Instant;
 
+/// Byte Order Mark types
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BomType {
+    None,
+    Utf8,
+    Utf16Be,
+    Utf16Le,
+    Utf32Be,
+    Utf32Le,
+}
+
+impl BomType {
+    fn as_bytes(&self) -> &'static [u8] {
+        match self {
+            BomType::None => b"",
+            BomType::Utf8 => b"\xef\xbb\xbf",
+            BomType::Utf16Be => b"\xfe\xff",
+            BomType::Utf16Le => b"\xff\xfe",
+            BomType::Utf32Be => b"\x00\x00\xfe\xff",
+            BomType::Utf32Le => b"\xff\xfe\x00\x00",
+        }
+    }
+
+    fn from_bytes(bytes: &[u8]) -> (BomType, usize) {
+        if bytes.starts_with(b"\xef\xbb\xbf") {
+            (BomType::Utf8, 3)
+        } else if bytes.starts_with(b"\x00\x00\xfe\xff") {
+            (BomType::Utf32Be, 4)
+        } else if bytes.starts_with(b"\xff\xfe\x00\x00") {
+            (BomType::Utf32Le, 4)
+        } else if bytes.starts_with(b"\xfe\xff") {
+            (BomType::Utf16Be, 2)
+        } else if bytes.starts_with(b"\xff\xfe") {
+            (BomType::Utf16Le, 2)
+        } else {
+            (BomType::None, 0)
+        }
+    }
+
+    fn to_lua_string(self, lua: &Lua) -> LuaResult<LuaString> {
+        let s = match self {
+            BomType::None => "none",
+            BomType::Utf8 => "utf-8",
+            BomType::Utf16Be => "utf-16-be",
+            BomType::Utf16Le => "utf-16-le",
+            BomType::Utf32Be => "utf-32-be",
+            BomType::Utf32Le => "utf-32-le",
+        };
+        lua.create_string(s)
+    }
+
+    #[allow(dead_code)]
+    fn from_lua_string(s: &str) -> BomType {
+        match s {
+            "utf-8" => BomType::Utf8,
+            "utf-16-be" => BomType::Utf16Be,
+            "utf-16-le" => BomType::Utf16Le,
+            "utf-32-be" => BomType::Utf32Be,
+            "utf-32-le" => BomType::Utf32Le,
+            _ => BomType::None,
+        }
+    }
+}
+
 static START_TIME: Lazy<Instant> = Lazy::new(Instant::now);
 
 fn now_secs() -> f64 {
@@ -29,6 +93,7 @@ struct BufferState {
     redo: Vec<Vec<u8>>,
     change_id: i64,
     crlf: bool,
+    bom: BomType,
     /// Cached content signature and the change_id it was computed at.
     sig_cache: (i64, u32),
     /// Tracks last edit for undo merging: (timestamp, line, col, was_insert, was_single_char).
@@ -58,6 +123,7 @@ fn default_buffer_state() -> BufferState {
         redo: Vec::new(),
         change_id: 1,
         crlf: false,
+        bom: BomType::None,
         sig_cache: (1, sig),
         last_edit: None,
     }
@@ -117,6 +183,7 @@ fn buffer_snapshot(lua: &Lua, state: &BufferState) -> LuaResult<LuaTable> {
     out.set("selections", set_selections(lua, &state.selections)?)?;
     out.set("change_id", state.change_id)?;
     out.set("crlf", state.crlf)?;
+    out.set("bom", state.bom.to_lua_string(lua)?)?;
     Ok(out)
 }
 
@@ -1063,7 +1130,13 @@ fn apply_edits_to_buffer(state: &mut BufferState, edits: LuaTable) -> LuaResult<
 
 fn load_file_into_state(state: &mut BufferState, filename: &str) -> LuaResult<()> {
     let bytes = fs::read(filename).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
-    let content = String::from_utf8_lossy(&bytes).to_string();
+
+    // Detect and strip BOM
+    let (bom, bom_len) = BomType::from_bytes(&bytes);
+    state.bom = bom;
+    let bytes_without_bom = if bom_len > 0 { &bytes[bom_len..] } else { &bytes };
+
+    let content = String::from_utf8_lossy(bytes_without_bom).to_string();
     state.lines.clear();
     state.crlf = content.contains("\r\n");
     if content.is_empty() {
@@ -1101,6 +1174,13 @@ fn save_state_to_file(state: &BufferState, filename: &str, crlf: bool) -> LuaRes
     let path = std::path::Path::new(filename);
     let tmp = path.with_extension("tmp");
     let mut f = fs::File::create(&tmp).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+
+    // Write BOM if present
+    if state.bom != BomType::None {
+        f.write_all(state.bom.as_bytes())
+            .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+    }
+
     for line in &state.lines {
         if crlf {
             f.write_all(line.replace('\n', "\r\n").as_bytes())

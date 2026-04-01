@@ -485,18 +485,13 @@ fn register_local_helpers(
                 let doc_val: LuaValue = av.get("doc")?;
                 if let LuaValue::Table(ref doc) = doc_val {
                     let abs: LuaValue = doc.get("abs_filename")?;
-                    if let LuaValue::String(ref s) = abs {
+                    if let LuaValue::String(_) = abs {
                         active_file_val = abs.clone();
-                        let userdir: String = lua.globals().get("USERDIR")?;
-                        let dir = std::path::PathBuf::from(&userdir)
-                            .join("storage")
-                            .join("session");
-                        let _ = std::fs::create_dir_all(&dir);
-                        let content = format!("\"{}\"", s.to_str()?);
-                        let _ = std::fs::write(dir.join("active_file"), &content);
                     }
                 }
             }
+            // Note: active_file is now written immediately on tab switch,
+            // not during session save. We still store it in session_data for compatibility.
             session_data.set("active_file", active_file_val)?;
 
             let save_fn: LuaFunction = session_native.get("save")?;
@@ -1541,6 +1536,13 @@ fn register_init_fn(
                 }
             }
 
+            // Close existing documents if files were specified on command line.
+            if files_list.raw_len() > 0 {
+                let root_view_close: LuaTable = core.get("root_view")?;
+                let close_all: LuaFunction = root_view_close.get("close_all_docviews")?;
+                close_all.call::<()>(root_view_close.clone())?;
+            }
+
             for file_val in files_list.sequence_values::<String>() {
                 let filename = file_val?;
                 let root_view2: LuaTable = core.get("root_view")?;
@@ -1554,6 +1556,7 @@ fn register_init_fn(
                 let add_thread: LuaFunction = core.get("add_thread")?;
                 let restore_fn = lua.create_function(|lua, ()| {
                     let core = get_core(lua)?;
+                    core.set("_restoring_session", true)?;
 
                     // Read active file from disk, falling back to session.json.
                     let saved_active: Option<String> = {
@@ -2007,6 +2010,7 @@ fn register_init_fn(
                         }
                     }
 
+                    core.set("_restoring_session", false)?;
                     Ok(())
                 })?;
                 add_thread.call::<()>(restore_fn)?;
@@ -3791,8 +3795,8 @@ fn register_doc_fns(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                 }
 
                 let log_quiet: LuaFunction = core.get("log_quiet")?;
-                if filename.is_some() {
-                    log_quiet.call::<()>(("Opened doc \"%s\"", filename))?;
+                if let Some(ref fname) = filename {
+                    log_quiet.call::<()>(("Opened doc \"%s\"", fname.clone()))?;
                 } else {
                     log_quiet.call::<()>("Opened new doc")?;
                 }
@@ -3991,6 +3995,16 @@ fn register_view_fns(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
                 }
                 core.set("last_active_view", active_view)?;
                 core.set("active_view", view.clone())?;
+
+                let doc_name = view
+                    .get::<Option<LuaTable>>("doc")
+                    .ok()
+                    .flatten()
+                    .and_then(|d| d.get::<Option<String>>("abs_filename").ok().flatten());
+                log::info!(
+                    "core.set_active_view -> {}",
+                    doc_name.as_deref().unwrap_or("<no file>")
+                );
             }
 
             Ok(())

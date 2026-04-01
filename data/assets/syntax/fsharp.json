@@ -149,21 +149,35 @@
   "yield": "keyword"
 }
 },
-  "20": {
+  "21": {
   "kind": "object",
   "values": {
   "pattern": "[%+%-=/%*%%<>!~|&%^%?@%.:]+",
   "type": "operator"
 }
 },
-  "21": {
+  "22": {
+  "kind": "object",
+  "values": {
+  "pattern": "'[%a_][%w_]*",
+  "type": "keyword2"
+}
+},
+  "23": {
+  "kind": "object",
+  "values": {
+  "pattern": "'[^'\\\\]'|'\\\\.'",
+  "type": "string"
+}
+},
+  "24": {
   "kind": "object",
   "values": {
   "pattern": "[%a_][%w_']*%f[(]",
   "type": "function"
 }
 },
-  "22": {
+  "25": {
   "kind": "object",
   "values": {
   "pattern": "[%a_][%w_']*",
@@ -191,19 +205,21 @@
 }, {
   "$ref": "13"
 }, {
-  "$ref": "15"
-}, {
   "$ref": "17"
 }, {
   "$ref": "18"
 }, {
   "$ref": "19"
 }, {
-  "$ref": "20"
-}, {
   "$ref": "21"
 }, {
   "$ref": "22"
+}, {
+  "$ref": "23"
+}, {
+  "$ref": "24"
+}, {
+  "$ref": "25"
 }]
 },
   "6": {

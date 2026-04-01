@@ -1,5 +1,13 @@
 # Change Log
 
+## [1.3.3] - 2026-04-01 — F# syntax fix, CLI file/folder open fix, active file fixes, and BOM support.
+
+* Fix wrong active file after restart: suppress active_file disk writes during session restore and exit so only user tab switches persist the value.
+* Remove duplicate active_file disk write that was in `core.set_active_view` (autoreload's patch is the single writer now).
+* Fix F# syntax highlighting for type parameters like `'Type` - no longer misinterpreted as character literals.
+* When opening lite-anvil with a file/directory from CLI, previously open files are now closed first.
+* Add full BOM (Byte Order Mark) support: UTF-8, UTF-16 BE/LE, and UTF-32 BE/LE BOMs are detected on load and preserved on save.
+
 ## [1.3.2] - 2026-03-31 — Dead code removal, float comparison fix, and error handling improvements.
 
 * Remove `#[allow(dead_code)]` on tree model watcher (legitimate RAII pattern, explicitly marked).
