@@ -1,20 +1,6 @@
 ---
-title: User Guide
-description: Shortcuts, commands, LSP support, test runner, and language reference for Lite-Anvil.
-tags:
-  - keyboard shortcuts
-  - LSP
-  - language server
-  - autocomplete
-  - code completion
-  - test runner
-  - syntax highlighting
-  - plugins
-  - rust-analyzer
-  - pyright
-  - gopls
-  - clangd
-  - typescript-language-server
+title: User Guide - Lite-Anvil
+description: Keyboard shortcuts, LSP language server setup, test runner configuration, syntax highlighting, and Lua plugin development for Lite-Anvil.
 ---
 
 # User Guide

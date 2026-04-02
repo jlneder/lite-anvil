@@ -106,11 +106,6 @@
   color: var(--md-accent-fg-color);
 }
 
-/* Hide tags -- SEO only */
-.md-tags {
-  display: none !important;
-}
-
 /* Hide sidebars on desktop only -- mobile needs them for the hamburger menu */
 @media screen and (min-width: 76.25em) {
   .md-sidebar {

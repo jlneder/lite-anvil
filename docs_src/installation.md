@@ -1,13 +1,6 @@
 ---
-title: Installation
-description: How to install Lite-Anvil from prebuilt binaries or build from source on Linux, macOS, and Windows.
-tags:
-  - install
-  - build from source
-  - Linux
-  - macOS
-  - Windows
-  - Rust
+title: Installation - Lite-Anvil
+description: Install Lite-Anvil from prebuilt binaries or build from source on Linux, macOS, and Windows. Requires Rust 1.85+, SDL3, FreeType2, PCRE2.
 ---
 
 # Installation

@@ -1,6 +1,6 @@
 ---
-title: API Reference
-description: Native Rust API exposed to Lua plugins in Lite-Anvil, with EmmyLua type annotations.
+title: API Reference - Lite-Anvil
+description: Lua plugin API reference for Lite-Anvil. Native Rust modules exposed to Lua with EmmyLua type annotations for autocompletion and type checking.
 ---
 
 # API Reference

@@ -1,6 +1,6 @@
 ---
-title: About
-description: About Lite-Anvil, its origins, and license.
+title: About - Lite-Anvil
+description: Lite-Anvil is a lightweight code editor forked from Lite XL and rewritten in Rust. MIT licensed.
 ---
 
 # About
