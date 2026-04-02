@@ -108,7 +108,7 @@
 
 /* Hide tags -- SEO only */
 .md-tags {
-  display: none;
+  display: none !important;
 }
 
 /* Hide sidebars on desktop only -- mobile needs them for the hamburger menu */
