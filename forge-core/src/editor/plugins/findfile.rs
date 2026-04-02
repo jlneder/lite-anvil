@@ -126,12 +126,27 @@ fn register_find_file_command(lua: &Lua) -> LuaResult<()> {
                     LuaValue::Table(t) => t.get::<String>("text").unwrap_or(text),
                     _ => text,
                 };
+                // Support file:line syntax (e.g. "main.rs:42").
+                let (file_part, goto_line) = match text.rfind(':') {
+                    Some(pos) if pos > 0 => {
+                        let after = &text[pos + 1..];
+                        match after.parse::<i64>() {
+                            Ok(n) if n > 0 => (text[..pos].to_owned(), Some(n)),
+                            _ => (text, None),
+                        }
+                    }
+                    _ => (text, None),
+                };
                 let common = require_table(lua, "core.common")?;
-                let expanded: String = common.call_function("home_expand", text)?;
+                let expanded: String = common.call_function("home_expand", file_part)?;
                 let core = require_table(lua, "core")?;
                 let doc: LuaTable = core.call_function("open_doc", expanded)?;
                 let root_view: LuaTable = core.get("root_view")?;
-                root_view.call_method::<()>("open_doc", doc)?;
+                let dv: LuaTable = root_view.call_method("open_doc", doc.clone())?;
+                if let Some(line) = goto_line {
+                    doc.call_method::<()>("set_selection", (line, 1))?;
+                    dv.call_method::<()>("scroll_to_line", (line, true, true))?;
+                }
                 let complete: LuaTable = lua.registry_value(&complete_key)?;
                 complete.set("done", true)?;
                 Ok(())

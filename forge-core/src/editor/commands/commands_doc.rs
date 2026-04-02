@@ -7,6 +7,31 @@ fn require_table(lua: &Lua, name: &str) -> LuaResult<LuaTable> {
     require.call(name)
 }
 
+/// Forces an immediate sidebar refresh by invalidating the project/tree models
+/// and triggering a synchronous rescan on the treeview.
+fn refresh_sidebar(lua: &Lua, core: &LuaTable) -> LuaResult<()> {
+    if let Some(project) = core.call_function::<Option<LuaTable>>("root_project", ())? {
+        if let Ok(path) = project.get::<String>("path") {
+            if let Ok(pm) = require_table(lua, "project_model") {
+                let _ = pm
+                    .get::<LuaFunction>("invalidate")
+                    .and_then(|f| f.call::<()>(path.clone()));
+            }
+            if let Ok(tm) = require_table(lua, "tree_model") {
+                let _ = tm
+                    .get::<LuaFunction>("invalidate")
+                    .and_then(|f| f.call::<()>(path));
+            }
+        }
+    }
+    if let Ok(tv) = core.get::<LuaTable>("_treeview_view_ref2") {
+        tv.set("items_dirty", true)?;
+        let _ = tv.call_method::<()>("sync_model", ());
+    }
+    core.set("redraw", true)?;
+    Ok(())
+}
+
 fn sort_positions(
     line1: usize,
     col1: usize,
@@ -128,6 +153,8 @@ fn save_with_filename(lua: &Lua, filename: Option<String>) -> LuaResult<()> {
                 update_recent.call::<()>(doc.get::<String>("abs_filename")?)?;
             }
             core.call_function::<()>("log", format!("Saved \"{saved_filename}\""))?;
+            // Refresh the sidebar so newly created files appear immediately.
+            refresh_sidebar(lua, &core)?;
         }
         Err(err) => {
             core.call_function::<()>("error", err.to_string())?;
@@ -1205,25 +1232,14 @@ fn register_commands(lua: &Lua) -> LuaResult<()> {
             let status_view: LuaTable = core.get("status_view")?;
             let mut text = doc.get::<Option<String>>("filename")?;
             if text.is_none() {
-                if let Some(last_active) = core.get::<Option<LuaTable>>("last_active_view")? {
-                    let last_doc: LuaTable = last_active.get("doc")?;
-                    if let Some(abs) = last_doc.get::<Option<String>>("abs_filename")? {
-                        if let Some(project) =
-                            core.call_function::<Option<LuaTable>>("root_project", ())?
-                        {
-                            if let Some((dirname, _)) = abs.rsplit_once(['/', '\\']) {
-                                let normalized: String =
-                                    project.call_method("normalize_path", dirname.to_string())?;
-                                let project_path: String = project.get("path")?;
-                                let pathsep: String = lua.globals().get("PATHSEP")?;
-                                text = Some(if normalized == project_path {
-                                    String::new()
-                                } else {
-                                    format!("{normalized}{pathsep}")
-                                });
-                            }
-                        }
-                    }
+                if let Some(project) =
+                    core.call_function::<Option<LuaTable>>("root_project", ())?
+                {
+                    let common = require_table(lua, "core.common")?;
+                    let pathsep: String = lua.globals().get("PATHSEP")?;
+                    let path: String = project.get("path")?;
+                    let encoded: String = common.call_function("home_encode", path)?;
+                    text = Some(format!("{encoded}{pathsep}"));
                 }
             }
 

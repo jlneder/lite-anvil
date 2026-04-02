@@ -1,5 +1,20 @@
 # Change Log
 
+## [1.5.0] - 2026-04-02 — Bookmarks, indent guides, line sorting, sidebar improvements, and 15 new language servers.
+
+* Add bookmarks plugin: toggle (Ctrl+F2), next (F2), previous (Shift+F2), clear. Accent marker in gutter.
+* Add indent guide plugin: vertical lines at each indentation level (off by default). Toggle via `indent-guide:toggle`.
+* Add line sorting commands: `lines:sort`, `lines:sort-reverse`, `lines:reverse`, `lines:unique`, `lines:sort-case-insensitive`.
+* Add goto-line support in file picker and open file dialog: type `file.rs:42` to open at a specific line.
+* Add sidebar context menu: Open, Copy Path, Copy Relative Path, Refresh, Rename, Delete, New File, New Folder.
+* Add `treeview:refresh` command for manual sidebar rescan.
+* Fix `doc:save-as` defaulting to `/` for unsaved files: now defaults to project root.
+* Fix unsaved changes dialog.
+* Move unsaved changes confirmation from command view (bottom bar) to NagView (top modal dialog) with Save/Close/Cancel buttons for consistency.
+* Sidebar refreshes instantly after save-as (direct `sync_model` call instead of waiting for dirwatch).
+* Deleting a file via sidebar now flags the open doc as dirty/unsaved.
+* Added builtin LSP specs for Elixir, Erlang, OCaml, Gleam, C/C++, Haskell, Zig, Dart, Scala, Swift, Ruby, Julia, Clojure, Crystal, Lua, and Bash.
+
 ## [1.4.1] - 2026-04-02 — Stability fixes and dead code cleanup.
 
 * Fix F# (fsautocomplete) root patterns to include `.fsproj` for standalone F# projects without solution files.

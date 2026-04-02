@@ -164,9 +164,20 @@ fn open_file(lua: &Lua, use_dialog: bool) -> LuaResult<()> {
     opts.set(
         "submit",
         lua.create_function(|lua, text: String| {
+            // Support file:line syntax (e.g. "src/main.rs:42").
+            let (file_text, goto_line) = match text.rfind(':') {
+                Some(pos) if pos > 0 => {
+                    let after = &text[pos + 1..];
+                    match after.parse::<i64>() {
+                        Ok(n) if n > 0 => (text[..pos].to_owned(), Some(n)),
+                        _ => (text, None),
+                    }
+                }
+                _ => (text, None),
+            };
             let core: LuaTable = require_table(lua, "core")?;
             let common: LuaTable = require_table(lua, "core.common")?;
-            let expanded: String = common.call_function("home_expand", text)?;
+            let expanded: String = common.call_function("home_expand", file_text)?;
             let project_path = current_project_path(lua)?;
             let root_project: LuaValue = core.get("root_project")?;
             let filename: String = if let LuaValue::Function(f) = root_project {
@@ -184,7 +195,12 @@ fn open_file(lua: &Lua, use_dialog: bool) -> LuaResult<()> {
             let _ = project_path;
             let root_view: LuaTable = core.get("root_view")?;
             let doc: LuaTable = core.call_function("open_doc", filename)?;
-            root_view.call_method::<()>("open_doc", doc)
+            let dv: LuaTable = root_view.call_method("open_doc", doc.clone())?;
+            if let Some(line) = goto_line {
+                doc.call_method::<()>("set_selection", (line, 1))?;
+                dv.call_method::<()>("scroll_to_line", (line, true, true))?;
+            }
+            Ok(())
         })?,
     )?;
     opts.set(

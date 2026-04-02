@@ -642,40 +642,121 @@ fn docview_try_close(lua: &Lua, (this, do_close): (LuaTable, LuaFunction)) -> Lu
     let is_dirty: bool = doc.call_method("is_dirty", ())?;
     let refs: LuaTable = core.call_function("get_views_referencing_doc", doc.clone())?;
     if is_dirty && refs.raw_len() == 1 {
-        let command_view: LuaTable = core.get("command_view")?;
-        let spec = lua.create_table()?;
-        let this_submit = this.clone();
-        let do_close_submit = do_close.clone();
-        spec.set(
-            "submit",
-            lua.create_function(move |_, (_text, item): (LuaValue, LuaTable)| {
-                let item_text: String = item.get("text")?;
-                if item_text.starts_with('C') || item_text.starts_with('c') {
-                    do_close_submit.call::<()>(())?;
-                } else if item_text.starts_with('S') || item_text.starts_with('s') {
-                    let doc: LuaTable = this_submit.get("doc")?;
+        let doc_name: String = doc.call_method("get_name", ())?;
+        let text = format!("\"{}\" has unsaved changes.", doc_name);
+
+        let options = lua.create_table()?;
+        let save_opt = lua.create_table()?;
+        save_opt.set("text", "Save And Close")?;
+        save_opt.set("default_yes", true)?;
+        let close_opt = lua.create_table()?;
+        close_opt.set("text", "Close Without Saving")?;
+        let cancel_opt = lua.create_table()?;
+        cancel_opt.set("text", "Cancel")?;
+        cancel_opt.set("default_no", true)?;
+        options.set(1, save_opt)?;
+        options.set(2, close_opt)?;
+        options.set(3, cancel_opt)?;
+
+        let callback = lua.create_function(move |lua, item: LuaTable| {
+            let item_text: String = item.get("text")?;
+            if item_text == "Save And Close" {
+                let doc: LuaTable = this.get("doc")?;
+                let has_filename =
+                    !matches!(doc.get::<LuaValue>("abs_filename")?, LuaValue::Nil);
+                if has_filename {
                     doc.call_method::<()>("save", ())?;
-                    do_close_submit.call::<()>(())?;
+                    do_close.call::<()>(())?;
+                } else {
+                    // No filename -- open a save-as prompt, close on success.
+                    let core = require_table(lua, "core")?;
+                    let common = require_table(lua, "core.common")?;
+                    let command_view: LuaTable = core.get("command_view")?;
+                    let spec = lua.create_table()?;
+                    let doc_submit = doc.clone();
+                    let do_close_submit = do_close.clone();
+                    spec.set(
+                        "submit",
+                        lua.create_function(move |lua, filename: String| {
+                            let common = require_table(lua, "core.common")?;
+                            let core = require_table(lua, "core")?;
+                            let expanded: String =
+                                common.call_function("home_expand", filename)?;
+                            let project =
+                                core.call_function::<Option<LuaTable>>("root_project", ())?;
+                            let (normalized, abs) = if let Some(ref p) = project {
+                                let n: String = p.call_method("normalize_path", expanded)?;
+                                let a: String = p.call_method("absolute_path", n.clone())?;
+                                (n, a)
+                            } else {
+                                let system: LuaTable = lua.globals().get("system")?;
+                                let a: String =
+                                    system.call_function("absolute_path", expanded.clone())?;
+                                (expanded, a)
+                            };
+                            doc_submit
+                                .call_method::<()>("save", (normalized, abs))?;
+                            // Refresh sidebar so the new file appears.
+                            if let Some(ref p) = project {
+                                if let Ok(path) = p.get::<String>("path") {
+                                    if let Ok(pm) = require_table(lua, "project_model") {
+                                        let _ = pm
+                                            .get::<LuaFunction>("invalidate")
+                                            .and_then(|f| f.call::<()>(path.clone()));
+                                    }
+                                    if let Ok(tm) = require_table(lua, "tree_model") {
+                                        let _ = tm
+                                            .get::<LuaFunction>("invalidate")
+                                            .and_then(|f| f.call::<()>(path));
+                                    }
+                                }
+                            }
+                            if let Ok(tv) = core.get::<LuaTable>("_treeview_view_ref2") {
+                                tv.set("items_dirty", true)?;
+                                let _ = tv.call_method::<()>("sync_model", ());
+                            }
+                            core.set("redraw", true)?;
+                            do_close_submit.call::<()>(())?;
+                            Ok(())
+                        })?,
+                    )?;
+                    spec.set(
+                        "suggest",
+                        lua.create_function(|lua, input: String| {
+                            let common = require_table(lua, "core.common")?;
+                            let expanded: String =
+                                common.call_function("home_expand", input)?;
+                            let suggestions: LuaValue =
+                                common.call_function("path_suggest", expanded)?;
+                            common.call_function::<LuaValue>("home_encode_list", suggestions)
+                        })?,
+                    )?;
+                    // Default to the project root directory.
+                    let pathsep: String = lua.globals().get("PATHSEP")?;
+                    let default_text =
+                        if let Some(project) =
+                            core.call_function::<Option<LuaTable>>("root_project", ())?
+                        {
+                            let path: String = project.get("path")?;
+                            let encoded: String =
+                                common.call_function("home_encode", path)?;
+                            format!("{encoded}{pathsep}")
+                        } else {
+                            String::new()
+                        };
+                    spec.set("text", default_text)?;
+                    command_view
+                        .call_method::<()>("enter", ("Save As", spec))?;
                 }
-                Ok(())
-            })?,
-        )?;
-        spec.set(
-            "suggest",
-            lua.create_function(|lua, text: String| {
-                let items = lua.create_table()?;
-                let mut idx = 1;
-                if !text.chars().next().is_some_and(|ch| ch != 'c' && ch != 'C') {
-                    items.set(idx, "Close Without Saving")?;
-                    idx += 1;
-                }
-                if !text.chars().next().is_some_and(|ch| ch != 's' && ch != 'S') {
-                    items.set(idx, "Save And Close")?;
-                }
-                Ok(items)
-            })?,
-        )?;
-        command_view.call_method::<()>("enter", ("Unsaved Changes; Confirm Close", spec))?;
+            } else if item_text == "Close Without Saving" {
+                do_close.call::<()>(())?;
+            }
+            // "Cancel" -- do nothing, nag dismisses itself.
+            Ok(())
+        })?;
+
+        let nag_view: LuaTable = core.get("nag_view")?;
+        nag_view.call_method::<()>("show", ("Unsaved Changes", text, options, callback))?;
     } else {
         do_close.call::<()>(())?;
     }

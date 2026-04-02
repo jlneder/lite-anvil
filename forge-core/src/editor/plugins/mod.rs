@@ -1,6 +1,7 @@
 pub(crate) mod autocomplete;
 pub(crate) mod autoreload;
 pub(crate) mod autorestart;
+pub(crate) mod bookmarks;
 pub(crate) mod bracketmatch;
 pub(crate) mod breadcrumbs;
 pub(crate) mod detectindent;
@@ -10,6 +11,7 @@ pub(crate) mod folding;
 pub(crate) mod git;
 pub(crate) mod git_view;
 pub(crate) mod gitignore;
+pub(crate) mod indentguide;
 pub(crate) mod language_md;
 pub(crate) mod lineguide;
 pub(crate) mod linewrap;
@@ -36,6 +38,7 @@ pub(crate) mod reflow;
 pub(crate) mod remotessh;
 pub(crate) mod scale;
 pub(crate) mod snippet;
+pub(crate) mod sortlines;
 pub(crate) mod tabularize;
 #[cfg(unix)]
 pub(crate) mod terminal;

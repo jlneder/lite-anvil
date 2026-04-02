@@ -259,8 +259,12 @@ fn load_view(
         let open_doc: LuaFunction = core.get("open_doc")?;
         let filename: LuaValue = spec.get("filename")?;
         let was_new_file = spec.get::<Option<LuaString>>("text")?.is_some();
+        // Unsaved (new_file) docs are restored by the backup system, not here.
+        if was_new_file {
+            return Ok(None);
+        }
         let doc: LuaValue = match filename {
-            LuaValue::Nil => open_doc.call(())?,
+            LuaValue::Nil => return Ok(None),
             value => {
                 let filename = match value {
                     LuaValue::String(s) => s.to_str()?.to_string(),
@@ -297,17 +301,10 @@ fn load_view(
             _ => return Ok(None),
         };
         let doc: LuaTable = view.get("doc")?;
-        // If the file no longer exists on disk but was a real file (not
-        // an unsaved scratch buffer), skip it instead of showing a
-        // phantom blank doc.
-        if bool_field(&doc, "new_file")? && !was_new_file {
-            return Ok(None);
-        }
+        // If the file no longer exists on disk, skip it instead of
+        // showing a phantom blank doc.
         if bool_field(&doc, "new_file")? {
-            if let Some(text) = spec.get::<Option<LuaString>>("text")? {
-                doc.call_method::<()>("insert", (1, 1, text.to_str()?.to_string()))?;
-                doc.set("crlf", spec.get::<LuaValue>("crlf")?)?;
-            }
+            return Ok(None);
         }
         let selection: LuaTable = spec.get("selection")?;
         let mut args = LuaMultiValue::new();

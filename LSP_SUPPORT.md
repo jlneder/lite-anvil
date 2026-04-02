@@ -24,6 +24,22 @@ Anvil does not install language servers for you.
 | TypeScript | typescript-language-server | `typescript-language-server` | `tsconfig.json`, `jsconfig.json`, `package.json` |
 | TSX | typescript-language-server | `typescript-language-server` | `tsconfig.json`, `jsconfig.json`, `package.json` |
 | PHP | Intelephense | `intelephense` | `composer.json` |
+| Elixir | elixir-ls | `elixir-ls` | `mix.exs` |
+| OCaml | ocamllsp | `ocamllsp` | `.ocamlformat`, `dune-project`, `*.opam` |
+| Gleam | gleam lsp | `gleam lsp` | `gleam.toml` |
+| Erlang | erlang_ls | `erlang_ls` | `rebar.config`, `erlang.mk` |
+| C/C++ | clangd | `clangd` | `.clangd`, `compile_commands.json` |
+| Haskell | haskell-language-server | `haskell-language-server --lsp` | `hie.yaml`, `*.cabal`, `stack.yaml` |
+| Zig | zls | `zls` | `build.zig` |
+| Dart | Dart SDK | `dart language-server` | `pubspec.yaml` |
+| Scala | Metals | `metals` | `build.sbt` |
+| Swift | SourceKit-LSP | `sourcekit-lsp` | `Package.swift` |
+| Ruby | ruby-lsp | `ruby-lsp` | `Gemfile` |
+| Julia | LanguageServer.jl | `julia -e 'using LanguageServer; runserver()'` | `Project.toml` |
+| Clojure | clojure-lsp | `clojure-lsp` | `deps.edn`, `project.clj` |
+| Crystal | Crystalline | `crystalline` | `shard.yml` |
+| Lua | lua-language-server | `lua-language-server` | `.luarc.json` |
+| Bash | bash-language-server | `bash-language-server start` | `.git` |
 
 All builtin specs fall back to `.git` as a final root marker.
 

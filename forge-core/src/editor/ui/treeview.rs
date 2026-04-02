@@ -1760,31 +1760,33 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             let divider: LuaValue = context_menu.get("DIVIDER")?;
             let items = lua.create_table()?;
 
-            let entries = [("Open in System", "treeview:open-in-system")];
-            let mut idx = 1;
-            for (text, cmd) in &entries {
-                let entry = lua.create_table()?;
-                entry.set("text", *text)?;
-                entry.set("command", *cmd)?;
-                items.raw_set(idx, entry)?;
-                idx += 1;
-            }
-            items.raw_set(idx, divider)?;
-            idx += 1;
-            let entries2 = [
-                ("Rename", "treeview:rename"),
-                ("Delete", "treeview:delete"),
-                ("New File", "treeview:new-file"),
-                ("New Folder", "treeview:new-folder"),
-                ("Remove directory", "treeview:remove-project-directory"),
-                ("Find in Directory", "treeview:search-in-directory"),
+            // Build context menu items with separators.
+            let menu: Vec<Option<(&str, &str)>> = vec![
+                Some(("Open", "treeview:open")),
+                None, // separator
+                Some(("Copy Path", "treeview:copy-path")),
+                Some(("Copy Relative Path", "treeview:copy-relative-path")),
+                None, // separator
+                Some(("Refresh", "treeview:refresh")),
+                None, // separator
+                Some(("Rename", "treeview:rename")),
+                Some(("Delete", "treeview:delete")),
+                None, // separator
+                Some(("New File", "treeview:new-file")),
+                Some(("New Folder", "treeview:new-folder")),
             ];
-            for (text, cmd) in &entries2 {
-                let entry = lua.create_table()?;
-                entry.set("text", *text)?;
-                entry.set("command", *cmd)?;
-                items.raw_set(idx, entry)?;
-                idx += 1;
+            for (i, item_spec) in menu.iter().enumerate() {
+                match item_spec {
+                    None => {
+                        items.raw_set(i as i64 + 1, divider.clone())?;
+                    }
+                    Some((text, cmd)) => {
+                        let entry = lua.create_table()?;
+                        entry.set("text", *text)?;
+                        entry.set("command", *cmd)?;
+                        items.raw_set(i as i64 + 1, entry)?;
+                    }
+                }
             }
             let result = lua.create_table()?;
             result.set("items", items)?;
@@ -2001,7 +2003,7 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
         let vk = Arc::clone(&view_key);
         let ipfk = Arc::clone(&is_project_folder_key);
         let tik = Arc::clone(&treeitem_key);
-        let pred = lua.create_function(move |lua, active_view: LuaValue| {
+        let pred = lua.create_function(move |lua, _active_view: LuaValue| {
             let ti_fn: LuaFunction = lua.registry_value(&tik)?;
             let item: LuaValue = ti_fn.call(())?;
             if let LuaValue::Table(ref t) = item {
@@ -2011,13 +2013,8 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                     return Ok((false, LuaValue::Nil));
                 }
                 let v: LuaTable = lua.registry_value(&vk)?;
-                let av = match active_view {
-                    LuaValue::Table(t) => t,
-                    _ => {
-                        let core: LuaTable = require_table(lua, "core")?;
-                        core.get("active_view")?
-                    }
-                };
+                let core: LuaTable = require_table(lua, "core")?;
+                let av: LuaTable = core.get("active_view")?;
                 if av == v {
                     return Ok((true, item));
                 }
@@ -2134,6 +2131,22 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                         }
                         let log_fn: LuaFunction = core.get("log")?;
                         log_fn.call::<()>(format!("Deleted \"{}\"", filename))?;
+                        // Flag open docs for deleted paths as dirty so the
+                        // user knows they no longer exist on disk.
+                        let dir_prefix = format!("{}/", filename);
+                        let docs: LuaTable = core.get("docs")?;
+                        for d in docs.sequence_values::<LuaTable>() {
+                            let d = d?;
+                            let abs: LuaValue = d.get("abs_filename")?;
+                            if let LuaValue::String(ref s) = abs {
+                                let path = s.to_str()?;
+                                if path == filename || path.starts_with(&dir_prefix) {
+                                    d.set("new_file", true)?;
+                                    d.set("filename", LuaValue::Nil)?;
+                                    d.set("abs_filename", LuaValue::Nil)?;
+                                }
+                            }
+                        }
                         let inv_fn: LuaFunction = lua.registry_value(&inv_fn_k)?;
                         let item_project: LuaValue = lua
                             .globals()
@@ -2506,6 +2519,71 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
             })?
         })?;
 
+        cmds.set("treeview:copy-path", {
+            let vk = Arc::clone(&vk);
+            lua.create_function(move |lua, ()| {
+                let v: LuaTable = lua.registry_value(&vk)?;
+                let item: LuaValue = v.call_method("get_selected_item", ())?;
+                if let LuaValue::Table(t) = item {
+                    let abs_filename: String = t.get("abs_filename")?;
+                    let system: LuaTable = lua.globals().get("system")?;
+                    system.call_function::<()>("set_clipboard", abs_filename)?;
+                }
+                Ok(())
+            })?
+        })?;
+
+        cmds.set("treeview:copy-relative-path", {
+            let vk = Arc::clone(&vk);
+            lua.create_function(move |lua, ()| {
+                let v: LuaTable = lua.registry_value(&vk)?;
+                let item: LuaValue = v.call_method("get_selected_item", ())?;
+                if let LuaValue::Table(t) = item {
+                    let abs_filename: String = t.get("abs_filename")?;
+                    let project: LuaValue = t.get("project")?;
+                    let relative = if let LuaValue::Table(ref p) = project {
+                        let path: String = p.get("path")?;
+                        abs_filename
+                            .strip_prefix(&path)
+                            .and_then(|s| s.strip_prefix('/'))
+                            .unwrap_or(&abs_filename)
+                            .to_owned()
+                    } else {
+                        abs_filename
+                    };
+                    let system: LuaTable = lua.globals().get("system")?;
+                    system.call_function::<()>("set_clipboard", relative)?;
+                }
+                Ok(())
+            })?
+        })?;
+
+        cmds.set("treeview:refresh", {
+            let vk = Arc::clone(&vk);
+            lua.create_function(move |lua, ()| {
+                let core: LuaTable = require_table(lua, "core")?;
+                let projects: LuaTable = core.get("projects")?;
+                for proj in projects.sequence_values::<LuaTable>() {
+                    let proj = proj?;
+                    let path: String = proj.get("path")?;
+                    if let Ok(pm) = require_table(lua, "project_model") {
+                        let _ = pm
+                            .get::<LuaFunction>("invalidate")
+                            .and_then(|f| f.call::<()>(path.clone()));
+                    }
+                    if let Ok(tm) = require_table(lua, "tree_model") {
+                        let _ = tm
+                            .get::<LuaFunction>("invalidate")
+                            .and_then(|f| f.call::<()>(path));
+                    }
+                }
+                let v: LuaTable = lua.registry_value(&vk)?;
+                v.set("items_dirty", true)?;
+                core.set("redraw", true)?;
+                Ok(())
+            })?
+        })?;
+
         command.call_function::<()>("add", (tree_view.clone(), cmds))?;
     }
 
@@ -2513,18 +2591,13 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
     {
         let vk = Arc::clone(&view_key);
         let tik = Arc::clone(&treeitem_key);
-        let pred = lua.create_function(move |lua, active_view: LuaValue| {
+        let pred = lua.create_function(move |lua, _active_view: LuaValue| {
             let ti_fn: LuaFunction = lua.registry_value(&tik)?;
             let item: LuaValue = ti_fn.call(())?;
             if matches!(item, LuaValue::Table(_)) {
                 let v: LuaTable = lua.registry_value(&vk)?;
-                let av = match active_view {
-                    LuaValue::Table(t) => t,
-                    _ => {
-                        let core: LuaTable = require_table(lua, "core")?;
-                        core.get("active_view")?
-                    }
-                };
+                let core: LuaTable = require_table(lua, "core")?;
+                let av: LuaTable = core.get("active_view")?;
                 if av == v {
                     return Ok((true, item));
                 }
@@ -2757,25 +2830,6 @@ fn build_treeview_plugin(lua: &Lua) -> LuaResult<LuaValue> {
                 Ok(())
             })?
         })?;
-
-        cmds.set(
-            "treeview:open-in-system",
-            lua.create_function(|lua, item: LuaTable| {
-                let abs_filename: String = item.get("abs_filename")?;
-                let platform: String = lua.globals().get("PLATFORM")?;
-                let system: LuaTable = lua.globals().get("system")?;
-                let exec: LuaFunction = system.get("exec")?;
-                let cmd = if platform == "Windows" {
-                    format!("start \"\" {:?}", abs_filename)
-                } else if platform.contains("Mac") {
-                    format!("open {:?}", abs_filename)
-                } else {
-                    format!("xdg-open {:?}", abs_filename)
-                };
-                exec.call::<()>(cmd)?;
-                Ok(())
-            })?,
-        )?;
 
         command.call_function::<()>("add", (pred, cmds))?;
     }

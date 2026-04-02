@@ -229,11 +229,13 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     plugins::autocomplete::register_preload(lua)?;
     plugins::autoreload::register_preload(lua)?;
     plugins::autorestart::register_preload(lua)?;
+    plugins::bookmarks::register_preload(lua)?;
     plugins::bracketmatch::register_preload(lua)?;
     plugins::detectindent::register_preload(lua)?;
     plugins::drawwhitespace::register_preload(lua)?;
     plugins::findfile::register_preload(lua)?;
     plugins::folding::register_preload(lua)?;
+    plugins::indentguide::register_preload(lua)?;
     plugins::language_md::register_preload(lua)?;
     plugins::lineguide::register_preload(lua)?;
     plugins::linewrapping::register_preload(lua)?;
@@ -245,6 +247,7 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
     plugins::reflow::register_preload(lua)?;
     plugins::remotessh::register_preload(lua)?;
     plugins::scale::register_preload(lua)?;
+    plugins::sortlines::register_preload(lua)?;
     plugins::tabularize::register_preload(lua)?;
     plugins::theme_toggle::register_preload(lua)?;
     ui::toolbarview::register_preload(lua)?;
@@ -256,12 +259,14 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
             "autocomplete",
             "autoreload",
             "autorestart",
+            "bookmarks",
             "bracketmatch",
             "breadcrumbs",
             "detectindent",
             "drawwhitespace",
             "findfile",
             "folding",
+            "indentguide",
             "language_md",
             "lineguide",
             "linewrapping",
@@ -274,6 +279,7 @@ pub fn register_stubs(lua: &Lua) -> LuaResult<()> {
             "reflow",
             "remotessh",
             "scale",
+            "sortlines",
             "tabularize",
             "terminal",
             "test_runner",
