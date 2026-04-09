@@ -788,6 +788,561 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         crate::signal::clear_shutdown();
     }
 
+    // ─── Unified command dispatch ─────────────────────────────────────────
+    // Single source of truth for command handling. Both the keyboard binding
+    // path and the command palette invoke this macro. Adding a new command
+    // means editing exactly one match arm here. Pass the command as `String`.
+    macro_rules! dispatch_command {
+        ($cmd_arg:expr) => {{
+            let cmd: String = $cmd_arg;
+            match cmd.as_str() {
+                "core:quit" => {
+                    if docs.iter().any(doc_is_modified) {
+                        nag_active = true;
+                        nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                        nag_tab_to_close = None;
+                    } else {
+                        quit = true;
+                    }
+                }
+                "core:force-quit" => {
+                    quit = true;
+                }
+                "core:find-command" => {
+                    palette_active = true;
+                    palette_query.clear();
+                    palette_results = all_commands.clone();
+                    palette_selected = 0;
+                }
+                "core:new-doc" => {
+                    let buf_id = buffer::insert_buffer(buffer::default_buffer_state());
+                    let mut dv = DocView::new();
+                    dv.buffer_id = Some(buf_id);
+                    docs.push(OpenDoc {
+                        view: dv,
+                        path: String::new(),
+                        name: "[new]".to_string(),
+                        saved_change_id: 1,
+                        saved_signature: buffer::content_signature(&["\n".to_string()]),
+                        indent_type: "soft".to_string(),
+                        indent_size: 2,
+                        git_changes: std::collections::HashMap::new(),
+                    });
+                    active_tab = docs.len() - 1;
+                }
+                "root:close" => {
+                    if !docs.is_empty() {
+                        if doc_is_modified(&docs[active_tab]) {
+                            let fname = &docs[active_tab].name;
+                            nag_message = format!("Save changes to {fname}?  [Y]es  [N]o  [Esc]Cancel");
+                            nag_active = true;
+                            nag_tab_to_close = Some(active_tab);
+                        } else {
+                            if let Some(d) = docs.get(active_tab) {
+                                autoreload.unwatch(&d.path);
+                            }
+                            docs.remove(active_tab);
+                            if docs.is_empty() {
+                                active_tab = 0;
+                            } else if active_tab >= docs.len() {
+                                active_tab = docs.len() - 1;
+                            }
+                        }
+                    }
+                }
+                "root:close-all" => {
+                    if docs.iter().any(doc_is_modified) {
+                        nag_active = true;
+                        nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                        nag_tab_to_close = None;
+                    } else {
+                        for d in &docs { autoreload.unwatch(&d.path); }
+                        docs.clear();
+                        active_tab = 0;
+                    }
+                }
+                "root:close-all-others" => {
+                    let keep = active_tab;
+                    for i in (0..docs.len()).rev() {
+                        if i != keep {
+                            autoreload.unwatch(&docs[i].path);
+                            docs.remove(i);
+                        }
+                    }
+                    active_tab = 0;
+                }
+                "root:close-or-quit" => {
+                    if docs.is_empty() {
+                        quit = true;
+                    } else if doc_is_modified(&docs[active_tab]) {
+                        let fname = &docs[active_tab].name;
+                        nag_message = format!("Save changes to {fname}?  [Y]es  [N]o  [Esc]Cancel");
+                        nag_active = true;
+                        nag_tab_to_close = Some(active_tab);
+                    } else {
+                        autoreload.unwatch(&docs[active_tab].path);
+                        docs.remove(active_tab);
+                        if docs.is_empty() {
+                            quit = true;
+                        } else if active_tab >= docs.len() {
+                            active_tab = docs.len() - 1;
+                        }
+                    }
+                }
+                "root:switch-to-next-tab" => {
+                    if !docs.is_empty() {
+                        active_tab = (active_tab + 1) % docs.len();
+                    }
+                }
+                "root:switch-to-previous-tab" => {
+                    if !docs.is_empty() {
+                        active_tab = if active_tab == 0 { docs.len() - 1 } else { active_tab - 1 };
+                    }
+                }
+                "root:toggle-sidebar" | "core:toggle-sidebar" => {
+                    sidebar_visible = !sidebar_visible;
+                }
+                "core:toggle-terminal" => {
+                    terminal.visible = !terminal.visible;
+                    if terminal.visible && terminal.terminals.is_empty() {
+                        terminal.spawn(&project_root);
+                        log_to_file(userdir, "Terminal spawned via toggle");
+                    }
+                    terminal.focused = terminal.visible;
+                }
+                "core:new-terminal" => {
+                    if terminal.spawn(&project_root) {
+                        log_to_file(userdir, &format!("New terminal {} spawned", terminal.terminals.len()));
+                    }
+                }
+                "core:close-terminal" => {
+                    terminal.close_active();
+                }
+                "core:toggle-minimap" => {
+                    minimap_visible = !minimap_visible;
+                }
+                "core:toggle-line-wrapping" => {
+                    line_wrapping = !line_wrapping;
+                }
+                "core:toggle-whitespace" => {
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        doc.view.show_whitespace = !doc.view.show_whitespace;
+                    }
+                }
+                "core:cycle-theme" => {
+                    if !available_themes.is_empty() {
+                        current_theme_idx = (current_theme_idx + 1) % available_themes.len();
+                        let new_theme = &available_themes[current_theme_idx];
+                        let tp = format!("{datadir}/assets/themes/{new_theme}.json");
+                        if let Ok(palette) = crate::editor::style::load_theme_palette(&tp) {
+                            apply_theme_to_style(&mut style, &palette);
+                        }
+                    }
+                }
+                "core:open-user-settings" => {
+                    let settings_path = format!("{userdir}/config.toml");
+                    if !std::path::Path::new(&settings_path).exists() {
+                        let _ = std::fs::write(&settings_path, NativeConfig::default_toml_template());
+                    }
+                    if open_file_into(&settings_path, &mut docs) {
+                        active_tab = docs.len() - 1;
+                    }
+                }
+                "about:version" => {
+                    info_message = Some((
+                        format!("Lite-Anvil v{}", env!("CARGO_PKG_VERSION")),
+                        Instant::now(),
+                    ));
+                }
+                "core:project-search" => {
+                    project_search_active = true;
+                    project_search_query.clear();
+                    project_search_results.clear();
+                    project_search_selected = 0;
+                }
+                "core:git-status" => {
+                    git_status_active = true;
+                    git_status_entries = run_git_status(&project_root);
+                    git_status_selected = 0;
+                }
+                "core:open-recent" => {
+                    cmdview_active = true;
+                    cmdview_mode = CmdViewMode::OpenRecent;
+                    cmdview_text.clear();
+                    cmdview_label = "Open Recent:".to_string();
+                    let mut combined: Vec<String> = Vec::new();
+                    for p in &recent_files {
+                        if !combined.contains(p) {
+                            combined.push(p.clone());
+                        }
+                    }
+                    for p in &recent_projects {
+                        if !combined.contains(p) {
+                            combined.push(p.clone());
+                        }
+                    }
+                    cmdview_suggestions = combined;
+                    cmdview_selected = 0;
+                }
+                "core:open-project-folder" => {
+                    cmdview_active = true;
+                    cmdview_mode = CmdViewMode::OpenFolder;
+                    cmdview_text = format!("{project_root}/");
+                    cmdview_label = "Open Folder:".to_string();
+                    cmdview_suggestions = path_suggest(&cmdview_text, &project_root, true);
+                    cmdview_selected = 0;
+                }
+                "core:open-file" | "core:open-file-from-project" => {
+                    cmdview_active = true;
+                    cmdview_mode = CmdViewMode::OpenFile;
+                    if let Some(doc) = docs.get(active_tab) {
+                        if let Some(pos) = doc.path.rfind('/') {
+                            cmdview_text = format!("{}/", &doc.path[..pos]);
+                        } else {
+                            cmdview_text = format!("{project_root}/");
+                        }
+                    } else {
+                        cmdview_text = format!("{project_root}/");
+                    }
+                    cmdview_label = "Open File:".to_string();
+                    cmdview_suggestions = path_suggest(&cmdview_text, &project_root, false);
+                    cmdview_selected = 0;
+                }
+                "core:open-file-dialog" => {
+                    if let Ok(output) = std::process::Command::new("zenity")
+                        .args(["--file-selection", "--title", "Open File"])
+                        .output()
+                    {
+                        if output.status.success() {
+                            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            if !path.is_empty() && open_file_into(&path, &mut docs) {
+                                active_tab = docs.len() - 1;
+                                autoreload.watch(&path);
+                            }
+                        }
+                    }
+                }
+                "core:open-folder-dialog" => {
+                    if let Ok(output) = std::process::Command::new("zenity")
+                        .args(["--file-selection", "--directory", "--title", "Open Project Folder"])
+                        .output()
+                    {
+                        if output.status.success() {
+                            let folder = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            if !folder.is_empty() && std::path::Path::new(&folder).is_dir() {
+                                if docs.iter().any(doc_is_modified) {
+                                    nag_active = true;
+                                    nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                                    nag_tab_to_close = None;
+                                } else {
+                                    for d in &docs { autoreload.unwatch(&d.path); }
+                                    docs.clear();
+                                    active_tab = 0;
+                                    project_root = folder;
+                                    sidebar_entries = scan_directory(&project_root, 0);
+                                    sidebar_visible = true;
+                                    update_recent(&mut recent_projects, &project_root, 20);
+                                    let _ = crate::editor::storage::save_text(userdir_path, "session", "recent_projects", &serde_json::to_string(&recent_projects).unwrap_or_default());
+                                }
+                            }
+                        }
+                    }
+                }
+                "core:find" | "find-replace:find" => {
+                    find_active = true;
+                    replace_active = false;
+                    find_focus_on_replace = false;
+                    find_query.clear();
+                }
+                "core:find-replace" | "find-replace:replace" => {
+                    find_active = true;
+                    replace_active = true;
+                    find_focus_on_replace = false;
+                    find_query.clear();
+                    replace_query.clear();
+                }
+                "doc:go-to-line" => {
+                    cmdview_active = true;
+                    cmdview_mode = CmdViewMode::OpenFile; // reuse mode, Enter parses as line number
+                    cmdview_text.clear();
+                    cmdview_label = "Go To Line:".to_string();
+                    cmdview_suggestions.clear();
+                    cmdview_selected = 0;
+                }
+                "doc:save" => {
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            let path = doc.path.clone();
+                            if !path.is_empty() {
+                                let saved_id = buffer::with_buffer(buf_id, |b| {
+                                    buffer::save_file(b, &path, b.crlf)
+                                        .map_err(|_| buffer::BufferError::UnknownBuffer)?;
+                                    Ok(b.change_id)
+                                });
+                                if let Ok(id) = saved_id {
+                                    doc.saved_change_id = id;
+                                    doc.saved_signature = buffer::with_buffer(buf_id, |b| Ok(buffer::content_signature(&b.lines))).unwrap_or(0);
+                                }
+                                log_to_file(userdir, &format!("Saved {path}"));
+                                doc.git_changes = crate::editor::git::diff_file(&path);
+                                let save_ext = path.rsplit('.').next().unwrap_or("");
+                                if ext_to_lsp_filetype(save_ext).is_some() {
+                                    if let Some(tid) = lsp_state.transport_id {
+                                        if lsp_state.initialized {
+                                            let uri = path_to_uri(&path);
+                                            let _ = lsp::send_message(tid, &lsp_did_save(&uri));
+                                            let line_count = buffer::with_buffer(buf_id, |b| Ok(b.lines.len())).unwrap_or(100);
+                                            let req_id = lsp_state.next_id();
+                                            lsp_state.pending_requests.insert(req_id, "textDocument/inlayHint".to_string());
+                                            lsp_state.inlay_hints.clear();
+                                            let _ = lsp::send_message(tid, &lsp_inlay_hint_request(req_id, &uri, 0, line_count));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "doc:undo" | "doc:redo" => {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            let _ = buffer::with_buffer_mut(buf_id, |b| {
+                                if cmd == "doc:undo" { buffer::undo(b); } else { buffer::redo(b); }
+                                Ok(())
+                            });
+                        }
+                        if lsp_state.transport_id.is_some() && lsp_state.initialized {
+                            lsp_state.inlay_hints.clear();
+                            let ext = doc.path.rsplit('.').next().unwrap_or("");
+                            if !doc.path.is_empty() && ext_to_lsp_filetype(ext).is_some() {
+                                lsp_state.last_change = Some(Instant::now());
+                                lsp_state.pending_change_uri = Some(path_to_uri(&doc.path));
+                                lsp_state.pending_change_version += 1;
+                            }
+                        }
+                    }
+                }
+                "doc:cut" => {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            let _ = buffer::with_buffer_mut(buf_id, |b| {
+                                let text = buffer::get_selected_text(b);
+                                if !text.is_empty() {
+                                    crate::window::set_clipboard_text(&text);
+                                    buffer::push_undo(b);
+                                    buffer::delete_selection(b);
+                                }
+                                Ok(())
+                            });
+                        }
+                    }
+                }
+                "doc:copy" => {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            let _ = buffer::with_buffer(buf_id, |b| {
+                                let text = buffer::get_selected_text(b);
+                                if !text.is_empty() {
+                                    crate::window::set_clipboard_text(&text);
+                                }
+                                Ok(())
+                            });
+                        }
+                    }
+                }
+                "doc:paste" => {
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            if let Some(text) = crate::window::get_clipboard_text() {
+                                let _ = buffer::with_buffer_mut(buf_id, |b| {
+                                    buffer::push_undo(b);
+                                    buffer::delete_selection(b);
+                                    let line = b.selections[0];
+                                    let col = b.selections[1];
+                                    if line <= b.lines.len() {
+                                        let l = &mut b.lines[line - 1];
+                                        let byte_pos = char_to_byte(l, col - 1);
+                                        let after = l[byte_pos..].to_string();
+                                        l.truncate(byte_pos);
+                                        let paste_lines: Vec<&str> = text.split('\n').collect();
+                                        if paste_lines.len() == 1 {
+                                            l.push_str(&text);
+                                            l.push_str(&after);
+                                            let new_col = col + text.chars().count();
+                                            b.selections = vec![line, new_col, line, new_col];
+                                        } else {
+                                            l.push_str(paste_lines[0]);
+                                            l.push('\n');
+                                            let mut cur_line = line;
+                                            for (i, pl) in paste_lines.iter().enumerate().skip(1) {
+                                                cur_line += 1;
+                                                if i == paste_lines.len() - 1 {
+                                                    let new_col = pl.chars().count() + 1;
+                                                    let mut new_line = pl.to_string();
+                                                    new_line.push_str(&after);
+                                                    b.lines.insert(cur_line - 1, new_line);
+                                                    b.selections = vec![cur_line, new_col, cur_line, new_col];
+                                                } else {
+                                                    b.lines.insert(cur_line - 1, format!("{pl}\n"));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Ok(())
+                                });
+                            }
+                        }
+                    }
+                }
+                "doc:upper-case" | "doc:lower-case" => {
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            let is_upper = cmd == "doc:upper-case";
+                            let _ = buffer::with_buffer_mut(buf_id, |b| {
+                                let text = buffer::get_selected_text(b);
+                                if !text.is_empty() {
+                                    buffer::push_undo(b);
+                                    buffer::delete_selection(b);
+                                    let converted = if is_upper { text.to_uppercase() } else { text.to_lowercase() };
+                                    let line = b.selections[0];
+                                    let col = b.selections[1];
+                                    if line <= b.lines.len() {
+                                        let l = &mut b.lines[line - 1];
+                                        let byte_pos = l.char_indices().nth(col - 1).map(|(i, _)| i).unwrap_or(l.len());
+                                        l.insert_str(byte_pos, &converted);
+                                        let new_col = col + converted.chars().count();
+                                        b.selections = vec![line, col, line, new_col];
+                                    }
+                                }
+                                Ok(())
+                            });
+                        }
+                    }
+                }
+                "doc:reload" => {
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        if !doc.path.is_empty() {
+                            if let Some(buf_id) = doc.view.buffer_id {
+                                let path = doc.path.clone();
+                                let _ = buffer::with_buffer_mut(buf_id, |b| {
+                                    let mut fresh = buffer::default_buffer_state();
+                                    let _ = buffer::load_file(&mut fresh, &path);
+                                    b.lines = fresh.lines;
+                                    b.change_id += 1;
+                                    Ok(())
+                                });
+                            }
+                        }
+                    }
+                }
+                "git:pull" | "git:push" | "git:commit" | "git:stash" => {
+                    let git_cmd = match cmd.as_str() {
+                        "git:pull" => vec!["pull"],
+                        "git:push" => vec!["push"],
+                        "git:commit" => vec!["commit", "--allow-empty-message", "-m", ""],
+                        "git:stash" => vec!["stash"],
+                        _ => vec![],
+                    };
+                    if !git_cmd.is_empty() {
+                        let _ = std::process::Command::new("git")
+                            .arg("-C").arg(&project_root)
+                            .args(&git_cmd)
+                            .output();
+                    }
+                }
+                "lsp:hover" => {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            if let Some(tid) = lsp_state.transport_id {
+                                if lsp_state.initialized && !doc.path.is_empty() {
+                                    let (cl, cc) = buffer::with_buffer(buf_id, |b| {
+                                        Ok((*b.selections.get(2).unwrap_or(&1), *b.selections.get(3).unwrap_or(&1)))
+                                    }).unwrap_or((1, 1));
+                                    let uri = path_to_uri(&doc.path);
+                                    let req_id = lsp_state.next_id();
+                                    lsp_state.pending_requests.insert(req_id, "textDocument/hover".to_string());
+                                    let _ = lsp::send_message(tid, &lsp_hover_request(req_id, &uri, cl - 1, cc - 1));
+                                    hover.line = cl;
+                                    hover.col = cc;
+                                }
+                            }
+                        }
+                    }
+                }
+                "lsp:go-to-definition" => {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            if let Some(tid) = lsp_state.transport_id {
+                                if lsp_state.initialized && !doc.path.is_empty() {
+                                    let (cl, cc) = buffer::with_buffer(buf_id, |b| {
+                                        Ok((*b.selections.get(2).unwrap_or(&1), *b.selections.get(3).unwrap_or(&1)))
+                                    }).unwrap_or((1, 1));
+                                    let uri = path_to_uri(&doc.path);
+                                    let req_id = lsp_state.next_id();
+                                    lsp_state.pending_requests.insert(req_id, "textDocument/definition".to_string());
+                                    let _ = lsp::send_message(tid, &lsp_definition_request(req_id, &uri, cl - 1, cc - 1));
+                                }
+                            }
+                        }
+                    }
+                }
+                "lsp:go-to-implementation" | "lsp:go-to-type-definition" | "lsp:find-references" => {
+                    let method = match cmd.as_str() {
+                        "lsp:go-to-implementation" => "textDocument/implementation",
+                        "lsp:go-to-type-definition" => "textDocument/typeDefinition",
+                        "lsp:find-references" => "textDocument/references",
+                        _ => unreachable!(),
+                    };
+                    if let Some(doc) = docs.get(active_tab) {
+                        if let Some(buf_id) = doc.view.buffer_id {
+                            if let Some(tid) = lsp_state.transport_id {
+                                if lsp_state.initialized && !doc.path.is_empty() {
+                                    let (cl, cc) = buffer::with_buffer(buf_id, |b| {
+                                        Ok((*b.selections.get(2).unwrap_or(&1), *b.selections.get(3).unwrap_or(&1)))
+                                    }).unwrap_or((1, 1));
+                                    let uri = path_to_uri(&doc.path);
+                                    let req_id = lsp_state.next_id();
+                                    lsp_state.pending_requests.insert(req_id, method.to_string());
+                                    let _ = lsp::send_message(tid, &lsp_position_request(req_id, method, &uri, cl - 1, cc - 1));
+                                }
+                            }
+                        }
+                    }
+                }
+                "scale:increase" | "scale:decrease" | "scale:reset" => {
+                    // Handled by direct key check above the dispatch.
+                }
+                _ => {
+                    // Default: forward to handle_doc_command and bump LSP edit tracking.
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        handle_doc_command(&mut doc.view, &cmd, &style, &doc.indent_type, doc.indent_size);
+                    }
+                    let is_edit_cmd = matches!(cmd.as_str(),
+                        "doc:newline" | "doc:newline-below" | "doc:newline-above"
+                        | "doc:backspace" | "doc:delete"
+                        | "doc:delete-to-previous-word-start" | "doc:delete-to-next-word-end"
+                        | "doc:indent" | "doc:unindent"
+                        | "doc:toggle-line-comments"
+                        | "doc:move-lines-up" | "doc:move-lines-down"
+                        | "doc:duplicate-lines" | "doc:delete-lines"
+                        | "doc:join-lines"
+                        | "core:sort-lines" | "doc:fold" | "doc:unfold" | "doc:unfold-all"
+                    );
+                    if is_edit_cmd && lsp_state.transport_id.is_some() && lsp_state.initialized {
+                        lsp_state.inlay_hints.clear();
+                        if let Some(doc) = docs.get(active_tab) {
+                            if !doc.path.is_empty() {
+                                lsp_state.last_change = Some(Instant::now());
+                                lsp_state.pending_change_uri = Some(path_to_uri(&doc.path));
+                                lsp_state.pending_change_version += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }};
+    }
+
     loop {
         if crate::signal::shutdown_requested() {
             crate::signal::clear_shutdown();
@@ -1436,240 +1991,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                         continue;
                                     }
                                     // Execute the selected command.
-                                    match cmd.as_str() {
-                                        "core:quit" => {
-                                            if docs.iter().any(doc_is_modified) {
-                                                nag_active = true;
-                                                nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
-                                                nag_tab_to_close = None;
-                                            } else {
-                                                quit = true;
-                                            }
-                                        }
-                                        "core:new-doc" => {
-                                            let buf_id = buffer::insert_buffer(buffer::default_buffer_state());
-                                            let mut dv = DocView::new();
-                                            dv.buffer_id = Some(buf_id);
-                                            docs.push(OpenDoc { view: dv, path: String::new(), name: "[new]".to_string(), saved_change_id: 1, saved_signature: buffer::content_signature(&["\n".to_string()]), indent_type: "soft".to_string(), indent_size: 2, git_changes: std::collections::HashMap::new() });
-                                            active_tab = docs.len() - 1;
-                                        }
-                                        "core:toggle-terminal" => {
-                                            terminal.visible = !terminal.visible;
-                                            if terminal.visible && terminal.terminals.is_empty() {
-                                                terminal.spawn(&project_root);
-                                            }
-                                            terminal.focused = terminal.visible;
-                                        }
-                                        "core:new-terminal" => {
-                                            terminal.spawn(&project_root);
-                                        }
-                                        "core:close-terminal" => {
-                                            if !terminal.terminals.is_empty() {
-                                                terminal.terminals.remove(terminal.active);
-                                                if terminal.terminals.is_empty() {
-                                                    terminal.visible = false;
-                                                    terminal.focused = false;
-                                                } else {
-                                                    terminal.active = terminal.active.min(terminal.terminals.len() - 1);
-                                                }
-                                            }
-                                        }
-                                        "core:toggle-sidebar" => {
-                                            sidebar_visible = !sidebar_visible;
-                                        }
-                                        "core:toggle-minimap" => {
-                                            minimap_visible = !minimap_visible;
-                                        }
-                                        "core:toggle-line-wrapping" => {
-                                            line_wrapping = !line_wrapping;
-                                        }
-                                        "core:toggle-whitespace" => {
-                                            if let Some(doc) = docs.get_mut(active_tab) {
-                                                doc.view.show_whitespace = !doc.view.show_whitespace;
-                                            }
-                                        }
-                                        "core:cycle-theme" => {
-                                            if !available_themes.is_empty() {
-                                                current_theme_idx = (current_theme_idx + 1) % available_themes.len();
-                                                let new_theme = &available_themes[current_theme_idx];
-                                                let tp = format!("{datadir}/assets/themes/{new_theme}.json");
-                                                if let Ok(palette) = crate::editor::style::load_theme_palette(&tp) {
-                                                    apply_theme_to_style(&mut style, &palette);
-                                                }
-                                            }
-                                        }
-                                        "core:open-user-settings" => {
-                                            let settings_path = format!("{userdir}/config.toml");
-                                            if !std::path::Path::new(&settings_path).exists() {
-                                                let _ = std::fs::write(&settings_path, NativeConfig::default_toml_template());
-                                            }
-                                            if open_file_into(&settings_path, &mut docs) {
-                                                active_tab = docs.len() - 1;
-                                            }
-                                        }
-                                        "about:version" => {
-                                            info_message = Some(("Lite-Anvil v2.0.0".to_string(), Instant::now()));
-                                        }
-                                        "core:force-quit" => {
-                                            quit = true;
-                                        }
-                                        "root:close-all" => {
-                                            let any_modified = docs.iter().any(doc_is_modified);
-                                            if any_modified {
-                                                nag_active = true;
-                                                nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
-                                                nag_tab_to_close = None;
-                                            } else {
-                                                for d in &docs { autoreload.unwatch(&d.path); }
-                                                docs.clear();
-                                                active_tab = 0;
-                                            }
-                                        }
-                                        "root:close-all-others" => {
-                                            let keep = active_tab;
-                                            for i in (0..docs.len()).rev() {
-                                                if i != keep {
-                                                    autoreload.unwatch(&docs[i].path);
-                                                    docs.remove(i);
-                                                }
-                                            }
-                                            active_tab = 0;
-                                        }
-                                        "root:close-or-quit" => {
-                                            if docs.is_empty() {
-                                                quit = true;
-                                            } else if doc_is_modified(&docs[active_tab]) {
-                                                let fname = &docs[active_tab].name;
-                                                nag_message = format!("Save changes to {fname}?  [Y]es  [N]o  [Esc]Cancel");
-                                                nag_active = true;
-                                                nag_tab_to_close = Some(active_tab);
-                                            } else {
-                                                autoreload.unwatch(&docs[active_tab].path);
-                                                docs.remove(active_tab);
-                                                if docs.is_empty() {
-                                                    quit = true;
-                                                } else if active_tab >= docs.len() {
-                                                    active_tab = docs.len() - 1;
-                                                }
-                                            }
-                                        }
-                                        "doc:upper-case" | "doc:lower-case" => {
-                                            if let Some(doc) = docs.get_mut(active_tab) {
-                                                if let Some(buf_id) = doc.view.buffer_id {
-                                                    let is_upper = cmd == "doc:upper-case";
-                                                    let _ = buffer::with_buffer_mut(buf_id, |b| {
-                                                        let text = buffer::get_selected_text(b);
-                                                        if !text.is_empty() {
-                                                            buffer::push_undo(b);
-                                                            buffer::delete_selection(b);
-                                                            let converted = if is_upper { text.to_uppercase() } else { text.to_lowercase() };
-                                                            let line = b.selections[0];
-                                                            let col = b.selections[1];
-                                                            if line <= b.lines.len() {
-                                                                let l = &mut b.lines[line - 1];
-                                                                let byte_pos = l.char_indices().nth(col - 1).map(|(i,_)| i).unwrap_or(l.len());
-                                                                l.insert_str(byte_pos, &converted);
-                                                                let new_col = col + converted.chars().count();
-                                                                b.selections = vec![line, col, line, new_col];
-                                                            }
-                                                        }
-                                                        Ok(())
-                                                    });
-                                                }
-                                            }
-                                        }
-                                        "doc:reload" => {
-                                            if let Some(doc) = docs.get_mut(active_tab) {
-                                                if !doc.path.is_empty() {
-                                                    if let Some(buf_id) = doc.view.buffer_id {
-                                                        let path = doc.path.clone();
-                                                        let _ = buffer::with_buffer_mut(buf_id, |b| {
-                                                            let mut fresh = buffer::default_buffer_state();
-                                                            let _ = buffer::load_file(&mut fresh, &path);
-                                                            b.lines = fresh.lines;
-                                                            b.change_id += 1;
-                                                            Ok(())
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        "git:pull" | "git:push" | "git:commit" | "git:stash" => {
-                                            let git_cmd = match cmd.as_str() {
-                                                "git:pull" => vec!["pull"],
-                                                "git:push" => vec!["push"],
-                                                "git:commit" => vec!["commit", "--allow-empty-message", "-m", ""],
-                                                "git:stash" => vec!["stash"],
-                                                _ => vec![],
-                                            };
-                                            if !git_cmd.is_empty() {
-                                                let _ = std::process::Command::new("git")
-                                                    .arg("-C").arg(&project_root)
-                                                    .args(&git_cmd)
-                                                    .output();
-                                            }
-                                        }
-                                        "core:find" => {
-                                            find_active = true;
-                                            replace_active = false;
-                                        }
-                                        "core:find-replace" => {
-                                            find_active = true;
-                                            replace_active = true;
-                                        }
-                                        "core:project-search" => {
-                                            project_search_active = true;
-                                            project_search_query.clear();
-                                            project_search_results.clear();
-                                            project_search_selected = 0;
-                                        }
-                                        "core:git-status" => {
-                                            git_status_active = true;
-                                            git_status_entries = run_git_status(&project_root);
-                                            git_status_selected = 0;
-                                        }
-                                        "core:open-recent" => {
-                                            cmdview_active = true;
-                                            cmdview_mode = CmdViewMode::OpenRecent;
-                                            cmdview_text.clear();
-                                            cmdview_label = "Open Recent:".to_string();
-                                            // Combine recent files and folders into one list.
-                                            let mut combined: Vec<String> = Vec::new();
-                                            for p in &recent_files { if !combined.contains(p) { combined.push(p.clone()); } }
-                                            for p in &recent_projects { if !combined.contains(p) { combined.push(p.clone()); } }
-                                            cmdview_suggestions = combined;
-                                            cmdview_selected = 0;
-                                        }
-                                        "core:open-project-folder" => {
-                                            cmdview_active = true;
-                                            cmdview_mode = CmdViewMode::OpenFolder;
-                                            cmdview_text = format!("{project_root}/");
-                                            cmdview_label = "Open Folder:".to_string();
-                                            cmdview_suggestions = path_suggest(&cmdview_text, &project_root, true);
-                                            cmdview_selected = 0;
-                                        }
-                                        "core:open-file" | "core:open-file-from-project" => {
-                                            cmdview_active = true;
-                                            cmdview_mode = CmdViewMode::OpenFile;
-                                            if let Some(doc) = docs.get(active_tab) {
-                                                if let Some(pos) = doc.path.rfind('/') {
-                                                    cmdview_text = format!("{}/", &doc.path[..pos]);
-                                                } else {
-                                                    cmdview_text = format!("{project_root}/");
-                                                }
-                                            } else {
-                                                cmdview_text = format!("{project_root}/");
-                                            }
-                                            cmdview_label = "Open File:".to_string();
-                                            cmdview_suggestions = path_suggest(&cmdview_text, &project_root, false);
-                                            cmdview_selected = 0;
-                                        }
-                                        _ => {
-                                            if let Some(doc) = docs.get_mut(active_tab) {
-                                                handle_doc_command(&mut doc.view, &cmd, &style, &doc.indent_type, doc.indent_size);
-                                            }
-                                        }
-                                    }
+                                    dispatch_command!(cmd);
                                 }
                                 redraw = true;
                                 continue;
@@ -1812,547 +2134,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
 
                     if let Some(cmds) = keymap.on_key_pressed(key, mods) {
                         for cmd in Vec::from(cmds) {
-                            match cmd.as_str() {
-                                "core:quit" => {
-                                    if docs.iter().any(doc_is_modified) {
-                                        nag_active = true;
-                                        nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
-                                        nag_tab_to_close = None;
-                                    } else {
-                                        quit = true;
-                                        break;
-                                    }
-                                }
-                                "scale:increase" | "scale:decrease" | "scale:reset" => {
-                                    // Handled by direct key check above.
-                                }
-                                "core:find-command" => {
-                                    palette_active = true;
-                                    palette_query.clear();
-                                    palette_results = all_commands.clone();
-                                    palette_selected = 0;
-                                }
-                                "core:new-doc" => {
-                                    let buf_id = buffer::insert_buffer(buffer::default_buffer_state());
-                                    let mut dv = DocView::new();
-                                    dv.buffer_id = Some(buf_id);
-                                    docs.push(OpenDoc {
-                                        view: dv,
-                                        path: String::new(),
-                                        name: "[new]".to_string(),
-                                        saved_change_id: 1,
-                                        saved_signature: buffer::content_signature(&["\n".to_string()]),
-                                        indent_type: "soft".to_string(),
-                                        indent_size: 2,
-                                        git_changes: std::collections::HashMap::new(),
-                                    });
-                                    active_tab = docs.len() - 1;
-                                }
-                                "root:close" => {
-                                    if !docs.is_empty() {
-                                        if doc_is_modified(&docs[active_tab]) {
-                                            let fname = &docs[active_tab].name;
-                                            nag_message =
-                                                format!("Save changes to {fname}?  [Y]es  [N]o  [Esc]Cancel");
-                                            nag_active = true;
-                                            nag_tab_to_close = Some(active_tab);
-                                        } else {
-                                            if let Some(d) = docs.get(active_tab) {
-                                                autoreload.unwatch(&d.path);
-                                            }
-                                            docs.remove(active_tab);
-                                            if docs.is_empty() {
-                                                active_tab = 0;
-                                            } else if active_tab >= docs.len() {
-                                                active_tab = docs.len() - 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                "root:switch-to-next-tab" => {
-                                    if !docs.is_empty() {
-                                        active_tab = (active_tab + 1) % docs.len();
-                                    }
-                                }
-                                "root:switch-to-previous-tab" => {
-                                    if !docs.is_empty() {
-                                        active_tab = if active_tab == 0 { docs.len() - 1 } else { active_tab - 1 };
-                                    }
-                                }
-                                "root:toggle-sidebar" => {
-                                    sidebar_visible = !sidebar_visible;
-                                }
-                                "core:toggle-terminal" => {
-                                    terminal.visible = !terminal.visible;
-                                    if terminal.visible
-                                        && terminal.terminals.is_empty()
-                                    {
-                                        terminal.spawn(&project_root);
-                                        log_to_file(
-                                            userdir,
-                                            "Terminal spawned via toggle",
-                                        );
-                                    }
-                                    terminal.focused = terminal.visible;
-                                }
-                                "core:new-terminal" => {
-                                    if terminal.spawn(&project_root) {
-                                        log_to_file(
-                                            userdir,
-                                            &format!(
-                                                "New terminal {} spawned",
-                                                terminal.terminals.len()
-                                            ),
-                                        );
-                                    }
-                                }
-                                "core:close-terminal" => {
-                                    terminal.close_active();
-                                }
-                                "core:toggle-minimap" => {
-                                    minimap_visible = !minimap_visible;
-                                }
-                                "core:toggle-line-wrapping" => {
-                                    line_wrapping = !line_wrapping;
-                                }
-                                "core:toggle-whitespace" => {
-                                    if let Some(doc) = docs.get_mut(active_tab) {
-                                        doc.view.show_whitespace = !doc.view.show_whitespace;
-                                    }
-                                }
-                                "core:cycle-theme" => {
-                                    if !available_themes.is_empty() {
-                                        current_theme_idx = (current_theme_idx + 1) % available_themes.len();
-                                        let new_theme = &available_themes[current_theme_idx];
-                                        let tp = format!("{datadir}/assets/themes/{new_theme}.json");
-                                        if let Ok(palette) = crate::editor::style::load_theme_palette(&tp) {
-                                            apply_theme_to_style(&mut style, &palette);
-                                        }
-                                    }
-                                }
-                                "core:open-user-settings" => {
-                                    let settings_path = format!("{userdir}/config.toml");
-                                    if !std::path::Path::new(&settings_path).exists() {
-                                        let _ = std::fs::write(&settings_path, NativeConfig::default_toml_template());
-                                    }
-                                    if open_file_into(&settings_path, &mut docs) {
-                                        active_tab = docs.len() - 1;
-                                    }
-                                }
-                                "about:version" => {
-                                    nag_active = true;
-                                    nag_message = "Lite-Anvil v2.0.0 — A lightweight code editor built in Rust with SDL3.".to_string();
-                                    nag_tab_to_close = None;
-                                }
-                                "core:force-quit" => {
-                                    quit = true;
-                                }
-                                "root:close-all" => {
-                                    if docs.iter().any(doc_is_modified) {
-                                        nag_active = true;
-                                        nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
-                                        nag_tab_to_close = None;
-                                    } else {
-                                        for d in &docs { autoreload.unwatch(&d.path); }
-                                        docs.clear();
-                                        active_tab = 0;
-                                    }
-                                }
-                                "root:close-all-others" => {
-                                    let keep = active_tab;
-                                    for i in (0..docs.len()).rev() {
-                                        if i != keep {
-                                            autoreload.unwatch(&docs[i].path);
-                                            docs.remove(i);
-                                        }
-                                    }
-                                    active_tab = 0;
-                                }
-                                "root:close-or-quit" => {
-                                    if docs.is_empty() {
-                                        quit = true;
-                                    } else if doc_is_modified(&docs[active_tab]) {
-                                        let fname = &docs[active_tab].name;
-                                        nag_message = format!("Save changes to {fname}?  [Y]es  [N]o  [Esc]Cancel");
-                                        nag_active = true;
-                                        nag_tab_to_close = Some(active_tab);
-                                    } else {
-                                        autoreload.unwatch(&docs[active_tab].path);
-                                        docs.remove(active_tab);
-                                        if docs.is_empty() {
-                                            quit = true;
-                                        } else if active_tab >= docs.len() {
-                                            active_tab = docs.len() - 1;
-                                        }
-                                    }
-                                }
-                                "git:pull" | "git:push" | "git:commit" | "git:stash" => {
-                                    let git_cmd = match cmd.as_str() {
-                                        "git:pull" => vec!["pull"],
-                                        "git:push" => vec!["push"],
-                                        "git:commit" => vec!["commit", "--allow-empty-message", "-m", ""],
-                                        "git:stash" => vec!["stash"],
-                                        _ => vec![],
-                                    };
-                                    if !git_cmd.is_empty() {
-                                        let _ = std::process::Command::new("git")
-                                            .arg("-C").arg(&project_root)
-                                            .args(&git_cmd)
-                                            .output();
-                                    }
-                                }
-                                "lsp:hover" => {
-                                    if let Some(doc) = docs.get(active_tab) {
-                                        if let Some(buf_id) = doc.view.buffer_id {
-                                            if let Some(tid) = lsp_state.transport_id {
-                                                if lsp_state.initialized
-                                                    && !doc.path.is_empty()
-                                                {
-                                                    let (cl, cc) =
-                                                        buffer::with_buffer(buf_id, |b| {
-                                                            let l = *b
-                                                                .selections
-                                                                .get(2)
-                                                                .unwrap_or(&1);
-                                                            let c = *b
-                                                                .selections
-                                                                .get(3)
-                                                                .unwrap_or(&1);
-                                                            Ok((l, c))
-                                                        })
-                                                        .unwrap_or((1, 1));
-                                                    let uri = path_to_uri(&doc.path);
-                                                    let req_id = lsp_state.next_id();
-                                                    lsp_state.pending_requests.insert(
-                                                        req_id,
-                                                        "textDocument/hover".to_string(),
-                                                    );
-                                                    let _ = lsp::send_message(
-                                                        tid,
-                                                        &lsp_hover_request(
-                                                            req_id,
-                                                            &uri,
-                                                            cl - 1,
-                                                            cc - 1,
-                                                        ),
-                                                    );
-                                                    hover.line = cl;
-                                                    hover.col = cc;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                "lsp:go-to-definition" => {
-                                    if let Some(doc) = docs.get(active_tab) {
-                                        if let Some(buf_id) = doc.view.buffer_id {
-                                            if let Some(tid) = lsp_state.transport_id {
-                                                if lsp_state.initialized
-                                                    && !doc.path.is_empty()
-                                                {
-                                                    let (cl, cc) =
-                                                        buffer::with_buffer(buf_id, |b| {
-                                                            let l = *b
-                                                                .selections
-                                                                .get(2)
-                                                                .unwrap_or(&1);
-                                                            let c = *b
-                                                                .selections
-                                                                .get(3)
-                                                                .unwrap_or(&1);
-                                                            Ok((l, c))
-                                                        })
-                                                        .unwrap_or((1, 1));
-                                                    let uri = path_to_uri(&doc.path);
-                                                    let req_id = lsp_state.next_id();
-                                                    lsp_state.pending_requests.insert(
-                                                        req_id,
-                                                        "textDocument/definition"
-                                                            .to_string(),
-                                                    );
-                                                    let _ = lsp::send_message(
-                                                        tid,
-                                                        &lsp_definition_request(
-                                                            req_id,
-                                                            &uri,
-                                                            cl - 1,
-                                                            cc - 1,
-                                                        ),
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                "lsp:go-to-implementation"
-                                | "lsp:go-to-type-definition"
-                                | "lsp:find-references" => {
-                                    let method = match cmd.as_str() {
-                                        "lsp:go-to-implementation" => "textDocument/implementation",
-                                        "lsp:go-to-type-definition" => "textDocument/typeDefinition",
-                                        "lsp:find-references" => "textDocument/references",
-                                        _ => unreachable!(),
-                                    };
-                                    if let Some(doc) = docs.get(active_tab) {
-                                        if let Some(buf_id) = doc.view.buffer_id {
-                                            if let Some(tid) = lsp_state.transport_id {
-                                                if lsp_state.initialized && !doc.path.is_empty() {
-                                                    let (cl, cc) = buffer::with_buffer(buf_id, |b| {
-                                                        Ok((*b.selections.get(2).unwrap_or(&1), *b.selections.get(3).unwrap_or(&1)))
-                                                    }).unwrap_or((1, 1));
-                                                    let uri = path_to_uri(&doc.path);
-                                                    let req_id = lsp_state.next_id();
-                                                    lsp_state.pending_requests.insert(req_id, method.to_string());
-                                                    let _ = lsp::send_message(tid, &lsp_position_request(req_id, method, &uri, cl - 1, cc - 1));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                "doc:go-to-line" => {
-                                    cmdview_active = true;
-                                    cmdview_mode = CmdViewMode::OpenFile; // reuse mode, Enter parses as line number
-                                    cmdview_text.clear();
-                                    cmdview_label = "Go To Line:".to_string();
-                                    cmdview_suggestions.clear();
-                                    cmdview_selected = 0;
-                                }
-                                "find-replace:find" => {
-                                    find_active = true;
-                                    replace_active = false;
-                                    find_focus_on_replace = false;
-                                    find_query.clear();
-                                }
-                                "find-replace:replace" => {
-                                    find_active = true;
-                                    replace_active = true;
-                                    find_focus_on_replace = false;
-                                    find_query.clear();
-                                    replace_query.clear();
-                                }
-                                "doc:save" => {
-                                    if let Some(doc) = docs.get_mut(active_tab) {
-                                        if let Some(buf_id) = doc.view.buffer_id {
-                                            let path = doc.path.clone();
-                                            if !path.is_empty() {
-                                                let saved_id = buffer::with_buffer(buf_id, |b| {
-                                                    buffer::save_file(b, &path, b.crlf)
-                                                        .map_err(|_| buffer::BufferError::UnknownBuffer)?;
-                                                    Ok(b.change_id)
-                                                });
-                                                if let Ok(id) = saved_id {
-                                                    doc.saved_change_id = id;
-                                                    doc.saved_signature = buffer::with_buffer(buf_id, |b| Ok(buffer::content_signature(&b.lines))).unwrap_or(0);
-                                                }
-                                                log_to_file(userdir, &format!("Saved {path}"));
-                                                doc.git_changes = crate::editor::git::diff_file(&path);
-                                                // Notify LSP of save and refresh inlay hints (only for LSP-handled files).
-                                                let save_ext = path.rsplit('.').next().unwrap_or("");
-                                                if ext_to_lsp_filetype(save_ext).is_some() {
-                                                    if let Some(tid) = lsp_state.transport_id {
-                                                        if lsp_state.initialized {
-                                                            let uri = path_to_uri(&path);
-                                                            let _ = lsp::send_message(tid, &lsp_did_save(&uri));
-                                                            let line_count = buffer::with_buffer(buf_id, |b| Ok(b.lines.len())).unwrap_or(100);
-                                                            let req_id = lsp_state.next_id();
-                                                            lsp_state.pending_requests.insert(req_id, "textDocument/inlayHint".to_string());
-                                                            lsp_state.inlay_hints.clear();
-                                                            let _ = lsp::send_message(tid, &lsp_inlay_hint_request(req_id, &uri, 0, line_count));
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                "doc:undo" | "doc:redo" => {
-                                    if let Some(doc) = docs.get(active_tab) {
-                                        if let Some(buf_id) = doc.view.buffer_id {
-                                            let _ = buffer::with_buffer_mut(buf_id, |b| {
-                                                if cmd == "doc:undo" { buffer::undo(b); } else { buffer::redo(b); }
-                                                Ok(())
-                                            });
-                                        }
-                                        // Clear stale hints and notify LSP.
-                                        if lsp_state.transport_id.is_some() && lsp_state.initialized {
-                                            lsp_state.inlay_hints.clear();
-                                            let ext = doc.path.rsplit('.').next().unwrap_or("");
-                                            if !doc.path.is_empty() && ext_to_lsp_filetype(ext).is_some() {
-                                                lsp_state.last_change = Some(Instant::now());
-                                                lsp_state.pending_change_uri = Some(path_to_uri(&doc.path));
-                                                lsp_state.pending_change_version += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                "doc:cut" => {
-                                    if let Some(doc) = docs.get(active_tab) { let dv = &doc.view;
-                                        if let Some(buf_id) = dv.buffer_id {
-                                            let _ = buffer::with_buffer_mut(buf_id, |b| {
-                                                let text = buffer::get_selected_text(b);
-                                                if !text.is_empty() {
-                                                    crate::window::set_clipboard_text(&text);
-                                                    buffer::push_undo(b);
-                                                    buffer::delete_selection(b);
-                                                }
-                                                Ok(())
-                                            });
-                                        }
-                                    }
-                                }
-                                "doc:copy" => {
-                                    if let Some(doc) = docs.get(active_tab) { let dv = &doc.view;
-                                        if let Some(buf_id) = dv.buffer_id {
-                                            let _ = buffer::with_buffer(buf_id, |b| {
-                                                let text = buffer::get_selected_text(b);
-                                                if !text.is_empty() {
-                                                    crate::window::set_clipboard_text(&text);
-                                                }
-                                                Ok(())
-                                            });
-                                        }
-                                    }
-                                }
-                                "doc:paste" => {
-                                    if let Some(doc) = docs.get_mut(active_tab) { let dv = &mut doc.view;
-                                        if let Some(buf_id) = dv.buffer_id {
-                                            if let Some(text) = crate::window::get_clipboard_text() {
-                                                let _ = buffer::with_buffer_mut(buf_id, |b| {
-                                                    buffer::push_undo(b);
-                                                    buffer::delete_selection(b);
-                                                    let line = b.selections[0];
-                                                    let col = b.selections[1];
-                                                    if line <= b.lines.len() {
-                                                        // Insert text at cursor, handling newlines.
-                                                        let l = &mut b.lines[line - 1];
-                                                        let byte_pos = char_to_byte(l, col - 1);
-                                                        let after = l[byte_pos..].to_string();
-                                                        l.truncate(byte_pos);
-                                                        let paste_lines: Vec<&str> = text.split('\n').collect();
-                                                        if paste_lines.len() == 1 {
-                                                            l.push_str(&text);
-                                                            l.push_str(&after);
-                                                            let new_col = col + text.chars().count();
-                                                            b.selections = vec![line, new_col, line, new_col];
-                                                        } else {
-                                                            l.push_str(paste_lines[0]);
-                                                            l.push('\n');
-                                                            let mut cur_line = line;
-                                                            for (i, pl) in paste_lines.iter().enumerate().skip(1) {
-                                                                cur_line += 1;
-                                                                if i == paste_lines.len() - 1 {
-                                                                    let new_col = pl.chars().count() + 1;
-                                                                    let mut new_line = pl.to_string();
-                                                                    new_line.push_str(&after);
-                                                                    b.lines.insert(cur_line - 1, new_line);
-                                                                    b.selections = vec![cur_line, new_col, cur_line, new_col];
-                                                                } else {
-                                                                    b.lines.insert(cur_line - 1, format!("{pl}\n"));
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    Ok(())
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                                "core:open-project-folder" => {
-                                    cmdview_active = true;
-                                    cmdview_mode = CmdViewMode::OpenFolder;
-                                    cmdview_text = format!("{project_root}/");
-                                    cmdview_label = "Open Folder:".to_string();
-                                    cmdview_suggestions = path_suggest(&cmdview_text, &project_root, true);
-                                    cmdview_selected = 0;
-                                }
-                                "core:open-file" | "core:open-file-from-project" => {
-                                    cmdview_active = true;
-                                    cmdview_mode = CmdViewMode::OpenFile;
-                                    if let Some(doc) = docs.get(active_tab) {
-                                        if let Some(pos) = doc.path.rfind('/') {
-                                            cmdview_text = format!("{}/", &doc.path[..pos]);
-                                        } else {
-                                            cmdview_text = format!("{project_root}/");
-                                        }
-                                    } else {
-                                        cmdview_text = format!("{project_root}/");
-                                    }
-                                    cmdview_label = "Open File:".to_string();
-                                    cmdview_suggestions = path_suggest(&cmdview_text, &project_root, false);
-                                    cmdview_selected = 0;
-                                }
-                                "core:open-file-dialog" => {
-                                    if let Ok(output) = std::process::Command::new("zenity")
-                                        .args(["--file-selection", "--title", "Open File"])
-                                        .output()
-                                    {
-                                        if output.status.success() {
-                                            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                                            if !path.is_empty() && open_file_into(&path, &mut docs) {
-                                                active_tab = docs.len() - 1;
-                                                autoreload.watch(&path);
-                                            }
-                                        }
-                                    }
-                                }
-                                "core:open-folder-dialog" => {
-                                    if let Ok(output) = std::process::Command::new("zenity")
-                                        .args(["--file-selection", "--directory", "--title", "Open Project Folder"])
-                                        .output()
-                                    {
-                                        if output.status.success() {
-                                            let folder = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                                            if !folder.is_empty() && std::path::Path::new(&folder).is_dir() {
-                                                if docs.iter().any(doc_is_modified) {
-                                                    nag_active = true;
-                                                    nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
-                                                    nag_tab_to_close = None;
-                                                } else {
-                                                    for d in &docs { autoreload.unwatch(&d.path); }
-                                                    docs.clear();
-                                                    active_tab = 0;
-                                                    project_root = folder;
-                                                    sidebar_entries = scan_directory(&project_root, 0);
-                                                    sidebar_visible = true;
-                                                    let abs = std::fs::canonicalize(&project_root).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| project_root.clone());
-                                                    recent_projects.retain(|p| p != &abs);
-                                                    recent_projects.insert(0, abs);
-                                                    if recent_projects.len() > 20 { recent_projects.truncate(20); }
-                                                    let _ = crate::editor::storage::save_text(userdir_path, "session", "recent_projects", &serde_json::to_string(&recent_projects).unwrap_or_default());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    if let Some(doc) = docs.get_mut(active_tab) {
-                                        handle_doc_command(&mut doc.view, &cmd, &style, &doc.indent_type, doc.indent_size);
-                                    }
-                                    // Adjust inlay hints and mark LSP change only for editing commands.
-                                    let is_edit_cmd = matches!(cmd.as_str(),
-                                        "doc:newline" | "doc:newline-below" | "doc:newline-above"
-                                        | "doc:backspace" | "doc:delete"
-                                        | "doc:delete-to-previous-word-start" | "doc:delete-to-next-word-end"
-                                        | "doc:indent" | "doc:unindent"
-                                        | "doc:toggle-line-comments"
-                                        | "doc:move-lines-up" | "doc:move-lines-down"
-                                        | "doc:duplicate-lines" | "doc:delete-lines"
-                                        | "doc:join-lines"
-                                        | "core:sort-lines" | "doc:fold" | "doc:unfold" | "doc:unfold-all"
-                                    );
-                                    if is_edit_cmd && lsp_state.transport_id.is_some() && lsp_state.initialized {
-                                        lsp_state.inlay_hints.clear();
-                                        if let Some(doc) = docs.get(active_tab) {
-                                            if !doc.path.is_empty() {
-                                                lsp_state.last_change = Some(Instant::now());
-                                                lsp_state.pending_change_uri = Some(path_to_uri(&doc.path));
-                                                lsp_state.pending_change_version += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            dispatch_command!(cmd);
                         }
                     }
                     redraw = true;
@@ -5023,12 +4805,17 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     );
 
     // Session save: persist open files, active tab, and project root via storage.
+    // Save the session even when no files are open, as long as there is a real
+    // project folder — otherwise the project_root is lost across restarts and
+    // the next launch falls back to cwd.
     let open_files: Vec<String> = docs
         .iter()
         .filter(|d| !d.path.is_empty())
         .map(|d| d.path.clone())
         .collect();
-    if !open_files.is_empty() {
+    let project_root_meaningful = project_root != "."
+        && std::path::Path::new(&project_root).is_dir();
+    if !open_files.is_empty() || project_root_meaningful {
         let session = SessionData {
             files: open_files,
             active: active_tab,

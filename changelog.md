@@ -1,5 +1,12 @@
 # Change Log
 
+## [2.1.2] - 2026-04-09 — Dispatch refactor + recent folder restore + version + keybinding fixes.
+
+* Refactored command dispatch into a single `dispatch_command!` macro. Both the keyboard binding path and the command palette now share one match block instead of duplicating logic in two places. Adding a new command is now a one-place edit.
+* Fixed Ctrl+Shift+R: actually opens the Open Recent picker (was a victim of the duplicate-dispatch bug; the refactor above prevents this class of bug).
+* Fixed recent folder not loading on restart: session save now persists `project_root` even when no files are open. Previously the session was cleared in that case, so the project folder was lost across restarts.
+* Fixed About: now reports the actual package version instead of a hardcoded `v2.0.0`.
+
 ## [2.1.1] - 2026-04-09 — Release pipeline + test workflow fixes.
 
 * Fixed release workflow regression: pinned `softprops/action-gh-release` to `@v2` (`@v3` does not exist).
