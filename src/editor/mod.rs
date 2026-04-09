@@ -49,6 +49,7 @@ pub mod node_view;
 pub mod picker;
 #[allow(dead_code)]
 pub mod plugins;
+#[cfg(unix)]
 #[allow(dead_code)]
 pub mod process;
 #[allow(dead_code)]

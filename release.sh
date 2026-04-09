@@ -9,7 +9,7 @@ fi
 MSG="$*"
 
 VERSION="$(awk -F'"' '
-  /^\[workspace\.package\]$/ { in_section = 1; next }
+  /^\[package\]$/ { in_section = 1; next }
   /^\[/ { in_section = 0 }
   in_section && $1 ~ /^version = / { print $2; exit }
 ' Cargo.toml)"

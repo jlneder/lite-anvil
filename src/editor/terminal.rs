@@ -1,9 +1,13 @@
+#[cfg(unix)]
 use libc::{self, c_int, pid_t};
+#[cfg(unix)]
 use std::ffi::CString;
 
+#[cfg(unix)]
 const INVALID_FD: c_int = -1;
 
 /// Terminal PTY inner state, independent of Lua.
+#[cfg(unix)]
 pub struct TerminalInner {
     pub pid: pid_t,
     pub fd: c_int,
@@ -11,6 +15,7 @@ pub struct TerminalInner {
     pub returncode: i32,
 }
 
+#[cfg(unix)]
 impl TerminalInner {
     /// Close the master PTY fd.
     pub fn close_fd(&mut self) {
@@ -139,6 +144,7 @@ impl TerminalInner {
 }
 
 /// Options for spawning a terminal.
+#[cfg(unix)]
 pub struct TerminalSpawnOptions {
     pub cwd: Option<CString>,
     pub env: Vec<(CString, CString)>,
@@ -146,6 +152,7 @@ pub struct TerminalSpawnOptions {
     pub rows: u16,
 }
 
+#[cfg(unix)]
 impl Default for TerminalSpawnOptions {
     fn default() -> Self {
         Self {
@@ -158,11 +165,13 @@ impl Default for TerminalSpawnOptions {
 }
 
 /// Ensure TERM and COLORTERM are set.
+#[cfg(unix)]
 pub fn ensure_terminal_env(env_pairs: &mut Vec<(CString, CString)>) -> Result<(), String> {
     ensure_terminal_env_with(env_pairs, |key| std::env::var_os(key).is_some())
 }
 
 /// Testable version with injectable environment check.
+#[cfg(unix)]
 pub fn ensure_terminal_env_with(
     env_pairs: &mut Vec<(CString, CString)>,
     mut inherited_has: impl FnMut(&str) -> bool,
@@ -180,6 +189,7 @@ pub fn ensure_terminal_env_with(
     Ok(())
 }
 
+#[cfg(unix)]
 fn push_env_pair(
     env_pairs: &mut Vec<(CString, CString)>,
     key: &str,
@@ -192,6 +202,7 @@ fn push_env_pair(
 }
 
 /// Spawn a terminal subprocess via forkpty. Returns `TerminalInner` on success.
+#[cfg(unix)]
 pub fn spawn_terminal(
     cmd_args: &[CString],
     opts: &TerminalSpawnOptions,
@@ -374,6 +385,7 @@ mod tests {
         assert!(runs.is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn ensure_env_adds_defaults() {
         let mut env = Vec::new();
@@ -382,8 +394,10 @@ mod tests {
         assert!(env.iter().any(|(k, _)| k.as_bytes() == b"COLORTERM"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn ensure_env_skips_existing() {
+        use std::ffi::CString;
         let mut env = vec![(
             CString::new("TERM").unwrap(),
             CString::new("custom").unwrap(),

@@ -1,6 +1,11 @@
 # Change Log
 
-## [2.0.0] - 2026-04-08 — Entirely Rust - Lua Removed + UI/Ux refinemnent.
+## [2.0.1] - 2026-04-09 — Windows build fix.
+
+* Fix Windows compilation: gate Unix-only PTY/process code behind `#[cfg(unix)]`.
+* Provide dummy terminal panel on non-Unix platforms.
+
+## [2.0.0] - 2026-04-08 — Entirely Rust - Lua Removed + UI/Ux refinement.
 
 * 100% Rust.
 * mlua (and Lua support, plugins) removed in favor of a fully native editor.
