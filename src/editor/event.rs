@@ -24,6 +24,7 @@ pub enum EditorEvent {
         x: f64,
         y: f64,
         clicks: u32,
+        modifiers: Modifiers,
     },
     MouseReleased {
         button: MouseButton,

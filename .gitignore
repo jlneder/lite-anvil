@@ -19,3 +19,6 @@ error.txt
 *.zip
 *.deb
 *.AppImage
+
+# Local build output
+/dist/

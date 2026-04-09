@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -82,7 +82,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -367,7 +367,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[workspace\.package\]$/ { in_section = 1; next }
+            /^\[package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -545,7 +545,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           path: artifacts/
 
@@ -553,7 +553,7 @@ jobs:
         run: |
           find artifacts -mindepth 2 -maxdepth 2 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} artifacts/ \;
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |

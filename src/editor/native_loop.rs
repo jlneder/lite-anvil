@@ -57,6 +57,43 @@ const DEFAULT_SIDEBAR_W: f64 = 200.0;
 const MIN_SIDEBAR_W: f64 = 100.0;
 const MAX_SIDEBAR_W: f64 = 600.0;
 
+/// Collapse redundant `.` segments in a path string. Preserves a single
+/// leading `./` for relative paths and leaves absolute paths intact.
+/// Does not touch `..` segments (we don't want to silently traverse symlinks).
+/// Collapse redundant `.` segments in a path string. Preserves a single
+/// leading `./` for relative paths and leaves absolute paths intact.
+/// Does not touch `..` segments (we don't want to silently traverse symlinks).
+fn normalize_path(p: &str) -> String {
+    use std::path::Component;
+    let path = Path::new(p);
+    let mut out = PathBuf::new();
+    let mut started_with_curdir = false;
+    let mut has_anchor = false;
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {
+                if !has_anchor && !started_with_curdir {
+                    out.push(".");
+                    started_with_curdir = true;
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                out.push(comp.as_os_str());
+                has_anchor = true;
+            }
+            _ => {
+                out.push(comp.as_os_str());
+                has_anchor = true;
+            }
+        }
+    }
+    if out.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        out.to_string_lossy().to_string()
+    }
+}
+
 /// Scan a directory non-recursively and return sorted sidebar entries at the given depth.
 fn scan_directory(dir: &str, depth: usize) -> Vec<SidebarEntry> {
     let mut entries = Vec::new();
@@ -236,7 +273,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     if let Ok(palette) = crate::editor::style::load_theme_palette(&theme_path) {
         apply_theme_to_style(&mut style, &palette);
     } else {
-        eprintln!("[native] Theme not found: {theme_path}, using defaults");
+        eprintln!("Theme not found: {theme_path}, using defaults");
     }
     // Build list of available themes.
     let available_themes: Vec<String> = {
@@ -328,9 +365,18 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         path: &str,
         docs: &mut Vec<OpenDoc>,
     ) -> bool {
+        // Resolve to an absolute path so doc.path round-trips through session
+        // save/load even if the cwd changes between runs. `std::path::absolute`
+        // does NOT touch the filesystem (preserves symlinks, works for missing
+        // files), unlike fs::canonicalize. Falls back to normalize_path on the
+        // rare error case so the error message is still meaningful.
+        let resolved = std::path::absolute(path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| normalize_path(path));
+        let path = resolved.as_str();
         let mut buf_state = buffer::default_buffer_state();
         if let Err(e) = buffer::load_file(&mut buf_state, path) {
-            eprintln!("[native] Failed to open {path}: {e}");
+            eprintln!("Failed to open {path}: {e}");
             return false;
         }
         let initial_change_id = buf_state.change_id;
@@ -394,6 +440,10 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         .unwrap_or(DEFAULT_SIDEBAR_W);
     let mut sidebar_dragging = false;
     let mut editor_mouse_down = false;
+    // Local shift-key tracker. SDL's mouse events don't carry modifier state,
+    // so tracking it from keyboard events directly by key name makes shift+click
+    // robust against any SDL_GetModState quirks on different platforms/WMs.
+    let mut shift_held = false;
     let mut tab_dragging: Option<usize> = None;
     let mut mouse_x: f64 = 0.0;
     let mut mouse_y: f64 = 0.0;
@@ -431,6 +481,24 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
             recent_projects.insert(0, abs);
             if recent_projects.len() > 20 { recent_projects.truncate(20); }
         }
+    }
+
+    // Recent files list (persisted, max 100).
+    let mut recent_files: Vec<String> = crate::editor::storage::load_text(userdir_path, "session", "recent_files")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    /// Add a path to a recent list (dedup, prepend, truncate).
+    fn update_recent(list: &mut Vec<String>, path: &str, limit: usize) {
+        let canonical = std::fs::canonicalize(path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| path.to_string());
+        if canonical.is_empty() { return; }
+        list.retain(|p| p != &canonical);
+        list.insert(0, canonical);
+        if list.len() > limit { list.truncate(limit); }
     }
 
     let fps = config.fps as f64;
@@ -499,8 +567,10 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     };
 
     // Command view state (keyboard-navigated autocomplete input).
+    // The "Open" prefix is semantically meaningful (vs Save/Close), so the variants stay prefixed.
+    #[allow(clippy::enum_variant_names)]
     #[derive(Clone, Copy, PartialEq)]
-    enum CmdViewMode { OpenFile, OpenFolder }
+    enum CmdViewMode { OpenFile, OpenFolder, OpenRecent }
     let mut cmdview_active = false;
     let mut cmdview_mode = CmdViewMode::OpenFile;
     let mut cmdview_text = String::new();
@@ -703,7 +773,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
             }
             Err(e) => {
                 log_to_file(userdir, &format!("Failed to spawn LSP: {e}"));
-                if verbose { eprintln!("[native] Failed to spawn LSP: {e}"); }
+                if verbose { eprintln!("Failed to spawn LSP: {e}"); }
             }
         }
     }
@@ -745,9 +815,18 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                 EditorEvent::Exposed | EditorEvent::Resized { .. } | EditorEvent::FocusGained => {
                     redraw = true;
                 }
+                EditorEvent::KeyReleased { key, .. } => {
+                    if key == "left shift" || key == "right shift" {
+                        shift_held = false;
+                    }
+                    continue;
+                }
                 EditorEvent::KeyPressed { key, modifiers } => {
                     cursor_blink_reset = Instant::now();
                     let mods = *modifiers;
+                    if key == "left shift" || key == "right shift" {
+                        shift_held = true;
+                    }
 
                     // Context menu intercepts keys when visible.
                     if context_menu.visible {
@@ -888,10 +967,15 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     return format!("{}{rest}", home.to_string_lossy());
                                 }
                             }
-                            if !text.starts_with('/') {
-                                return format!("{project_root}/{text}");
+                            if text.starts_with('/') {
+                                return text.to_string();
                             }
-                            text.to_string()
+                            let joined = format!(
+                                "{}/{}",
+                                project_root.trim_end_matches('/'),
+                                text,
+                            );
+                            normalize_path(&joined)
                         }
 
                         match key.as_str() {
@@ -935,6 +1019,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                             if open_file_into(&path, &mut docs) {
                                                 active_tab = docs.len() - 1;
                                                 autoreload.watch(&path);
+                                                update_recent(&mut recent_files, &path, 100);
                                             }
                                         } else if p.is_dir() {
                                             // Navigate into directory.
@@ -966,6 +1051,31 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                                 recent_projects.retain(|p| p != &abs);
                                                 recent_projects.insert(0, abs);
                                                 if recent_projects.len() > 20 { recent_projects.truncate(20); }
+                                                let _ = crate::editor::storage::save_text(userdir_path, "session", "recent_projects", &serde_json::to_string(&recent_projects).unwrap_or_default());
+                                            }
+                                        }
+                                    }
+                                    CmdViewMode::OpenRecent => {
+                                        cmdview_active = false;
+                                        if p.is_file() {
+                                            if open_file_into(&path, &mut docs) {
+                                                active_tab = docs.len() - 1;
+                                                autoreload.watch(&path);
+                                                update_recent(&mut recent_files, &path, 100);
+                                            }
+                                        } else if p.is_dir() {
+                                            if docs.iter().any(doc_is_modified) {
+                                                nag_active = true;
+                                                nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
+                                                nag_tab_to_close = None;
+                                            } else {
+                                                for d in &docs { autoreload.unwatch(&d.path); }
+                                                docs.clear();
+                                                active_tab = 0;
+                                                project_root = path;
+                                                sidebar_entries = scan_directory(&project_root, 0);
+                                                sidebar_visible = true;
+                                                update_recent(&mut recent_projects, &project_root, 20);
                                                 let _ = crate::editor::storage::save_text(userdir_path, "session", "recent_projects", &serde_json::to_string(&recent_projects).unwrap_or_default());
                                             }
                                         }
@@ -1007,11 +1117,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     cmdview_text.pop();
                                 }
                                 let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
-                                if cmdview_text.is_empty() && dirs_only {
-                                    cmdview_suggestions = recent_projects.clone();
-                                } else {
-                                    cmdview_suggestions = path_suggest(&cmdview_text, &project_root, dirs_only);
-                                }
+                                cmdview_suggestions = path_suggest(&cmdview_text, &project_root, dirs_only);
                                 cmdview_selected = 0;
                             }
                             _ => {}
@@ -1408,7 +1514,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                             quit = true;
                                         }
                                         "root:close-all" => {
-                                            let any_modified = docs.iter().any(|d| doc_is_modified(d));
+                                            let any_modified = docs.iter().any(doc_is_modified);
                                             if any_modified {
                                                 nag_active = true;
                                                 nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
@@ -1522,13 +1628,24 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                             git_status_entries = run_git_status(&project_root);
                                             git_status_selected = 0;
                                         }
+                                        "core:open-recent" => {
+                                            cmdview_active = true;
+                                            cmdview_mode = CmdViewMode::OpenRecent;
+                                            cmdview_text.clear();
+                                            cmdview_label = "Open Recent:".to_string();
+                                            // Combine recent files and folders into one list.
+                                            let mut combined: Vec<String> = Vec::new();
+                                            for p in &recent_files { if !combined.contains(p) { combined.push(p.clone()); } }
+                                            for p in &recent_projects { if !combined.contains(p) { combined.push(p.clone()); } }
+                                            cmdview_suggestions = combined;
+                                            cmdview_selected = 0;
+                                        }
                                         "core:open-project-folder" => {
                                             cmdview_active = true;
                                             cmdview_mode = CmdViewMode::OpenFolder;
-                                            cmdview_text = String::new();
+                                            cmdview_text = format!("{project_root}/");
                                             cmdview_label = "Open Folder:".to_string();
-                                            // Show recent projects when text is empty.
-                                            cmdview_suggestions = recent_projects.clone();
+                                            cmdview_suggestions = path_suggest(&cmdview_text, &project_root, true);
                                             cmdview_selected = 0;
                                         }
                                         "core:open-file" | "core:open-file-from-project" => {
@@ -1831,7 +1948,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     quit = true;
                                 }
                                 "root:close-all" => {
-                                    if docs.iter().any(|d| doc_is_modified(d)) {
+                                    if docs.iter().any(doc_is_modified) {
                                         nag_active = true;
                                         nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
                                         nag_tab_to_close = None;
@@ -2187,7 +2304,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                         if output.status.success() {
                                             let folder = String::from_utf8_lossy(&output.stdout).trim().to_string();
                                             if !folder.is_empty() && std::path::Path::new(&folder).is_dir() {
-                                                if docs.iter().any(|d| doc_is_modified(d)) {
+                                                if docs.iter().any(doc_is_modified) {
                                                     nag_active = true;
                                                     nag_message = "Unsaved changes. Save all before switching project?  [Y]es  [N]o  [Esc]Cancel".to_string();
                                                     nag_tab_to_close = None;
@@ -2254,8 +2371,8 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         let prev_text = cmdview_text.clone();
                         cmdview_text.push_str(text);
                         let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
-                        if cmdview_text.is_empty() && dirs_only {
-                            cmdview_suggestions = recent_projects.clone();
+                        if cmdview_text.is_empty() {
+                            cmdview_suggestions = if dirs_only { recent_projects.clone() } else { recent_files.clone() };
                         } else {
                             cmdview_suggestions = path_suggest(&cmdview_text, &project_root, dirs_only);
                         }
@@ -2315,6 +2432,12 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     buffer::push_undo_mergeable(b, line, col, false);
                                 } else {
                                     buffer::push_undo(b);
+                                }
+                                // Typing over an active selection replaces it. Only the
+                                // single-cursor case is handled here; multi-cursor selection
+                                // replacement would need per-cursor reverse-order deletion.
+                                if has_sel && buffer::cursor_count(b) == 1 {
+                                    buffer::delete_selection(b);
                                 }
                                 // Collect cursor positions, sorted bottom-to-top so
                                 // insertions don't shift earlier cursor positions.
@@ -2438,7 +2561,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     }
                     redraw = true;
                 }
-                EditorEvent::MousePressed { button, x, y, .. } => {
+                EditorEvent::MousePressed { button, x, y, modifiers, .. } => {
                     cursor_blink_reset = Instant::now();
                     // Nag bar button click handling.
                     if nag_active && *button == MouseButton::Left {
@@ -2909,14 +3032,20 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             } else {
                                 1usize
                             };
+                            let extending = shift_held || modifiers.shift;
                             let _ = buffer::with_buffer_mut(buf_id, |b| {
                                 let line = click_line.min(b.lines.len()).max(1);
                                 let max_col = char_count(b.lines[line - 1].trim_end_matches('\n')) + 1;
                                 let col = click_col.min(max_col);
-                                b.selections[0] = line;
-                                b.selections[1] = col;
-                                b.selections[2] = line;
-                                b.selections[3] = col;
+                                if extending && b.selections.len() >= 4 {
+                                    // Shift+click extends the existing selection: keep the
+                                    // anchor (selections[0..2]) and only move the cursor end.
+                                    b.selections.truncate(4);
+                                    b.selections[2] = line;
+                                    b.selections[3] = col;
+                                } else {
+                                    b.selections = vec![line, col, line, col];
+                                }
                                 Ok(())
                             });
                             editor_mouse_down = true;
@@ -3538,6 +3667,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     let digits = format!("{}", line_count).len().max(2);
                     let char_w = draw_ctx.font_width(style.code_font, "9");
                     dv.gutter_width = char_w * digits as f64 + style.padding_x * 2.0;
+                    dv.code_char_w = char_w;
                 }
                 dv.update(&uctx);
             }
@@ -3900,8 +4030,6 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             let name_x = x + icon_w;
                             let name_color = if entry.is_dir {
                                 style.accent.to_array()
-                            } else if is_active {
-                                style.text.to_array()
                             } else {
                                 style.text.to_array()
                             };
@@ -4879,6 +5007,21 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         crate::window::wait_event(Some(frame_interval));
     }
 
+    // Persist recent files: add all currently open docs to recent_files.
+    for doc in &docs {
+        if !doc.path.is_empty() {
+            update_recent(&mut recent_files, &doc.path, 100);
+        }
+    }
+    let _ = crate::editor::storage::save_text(
+        userdir_path, "session", "recent_files",
+        &serde_json::to_string(&recent_files).unwrap_or_default(),
+    );
+    let _ = crate::editor::storage::save_text(
+        userdir_path, "session", "recent_projects",
+        &serde_json::to_string(&recent_projects).unwrap_or_default(),
+    );
+
     // Session save: persist open files, active tab, and project root via storage.
     let open_files: Vec<String> = docs
         .iter()
@@ -4893,11 +5036,11 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         };
         if let Ok(json) = serde_json::to_string_pretty(&session) {
             if let Err(e) = storage::save_text(userdir_path, "session", "files", &json) {
-                eprintln!("[native] Failed to save session: {e}");
+                eprintln!("Failed to save session: {e}");
             }
         }
     } else if let Err(e) = storage::clear(userdir_path, "session", Some("files")) {
-        eprintln!("[native] Failed to clear session: {e}");
+        eprintln!("Failed to clear session: {e}");
     }
 
     // Save window size and position.
@@ -4909,7 +5052,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
         "window",
         &win_json.to_string(),
     ) {
-        eprintln!("[native] Failed to save window size: {e}");
+        eprintln!("Failed to save window size: {e}");
     }
 
     // Shut down all terminals.
@@ -5053,11 +5196,13 @@ fn handle_doc_command(
     let Some(buf_id) = dv.buffer_id else { return };
     let line_h = style.code_font_height * 1.2;
 
+    let mut prev_cursor_line: usize = 0;
     let _ = buffer::with_buffer_mut(buf_id, |b| {
         let anchor_line = *b.selections.first().unwrap_or(&1);
         let anchor_col = *b.selections.get(1).unwrap_or(&1);
         let cursor_line = *b.selections.get(2).unwrap_or(&anchor_line);
         let cursor_col = *b.selections.get(3).unwrap_or(&anchor_col);
+        prev_cursor_line = cursor_line;
         let line_count = b.lines.len();
 
         // Selection: shift variants move cursor but keep anchor.
@@ -5498,11 +5643,7 @@ fn handle_doc_command(
             }
             "doc:toggle-line-comments" => {
                 buffer::push_undo(b);
-                let comment = match std::path::Path::new(indent_type).extension().and_then(|e| e.to_str()) {
-                    _ => "// " // default; indent_type is not ext, use file ext from caller context
-                };
-                // Determine comment prefix from common languages.
-                // (indent_type field is reused here; the actual ext-based prefix is set below)
+                let comment = "// ";
                 let (start, end) = if anchor_line != cursor_line {
                     let s = anchor_line.min(cursor_line);
                     let e = anchor_line.max(cursor_line);
@@ -5605,6 +5746,32 @@ fn handle_doc_command(
         }
         Ok(())
     });
+
+    // Horizontal auto-scroll to keep cursor visible (e.g. End on a long line).
+    // Cross-line jumps only scroll LEFT (to reveal a cursor at a small column),
+    // never RIGHT (which would push the left-side content of nearby shorter
+    // lines off-screen and make the document appear blank).
+    if dv.code_char_w > 0.0 {
+        let _ = buffer::with_buffer(buf_id, |b| {
+            let cursor_line_now = *b.selections.get(2).unwrap_or(&1);
+            let cursor_col = *b.selections.get(3).unwrap_or(&1);
+            let cursor_x = (cursor_col as f64 - 1.0) * dv.code_char_w;
+            let text_w = (dv.rect().w - dv.gutter_width - style.padding_x * 2.0
+                - style.scrollbar_size)
+                .max(0.0);
+            // Keep one char of trailing padding so the caret isn't flush with the right edge.
+            let right_pad = dv.code_char_w;
+            let same_line = cursor_line_now == prev_cursor_line;
+            if cursor_x < dv.scroll_x {
+                dv.scroll_x = cursor_x;
+                dv.target_scroll_x = cursor_x;
+            } else if same_line && cursor_x + right_pad > dv.scroll_x + text_w {
+                dv.scroll_x = (cursor_x + right_pad - text_w).max(0.0);
+                dv.target_scroll_x = dv.scroll_x;
+            }
+            Ok(())
+        });
+    }
 
     // Fold/unfold commands operate on dv.folds outside the buffer closure.
     match cmd {
@@ -5976,7 +6143,7 @@ fn build_render_lines(
                 let mut depth: usize = 0;
                 let mut new_tokens = Vec::with_capacity(tokens.len());
                 for tok in tokens {
-                    let has_bracket = tok.text.contains(|c: char| matches!(c, '('|')'|'['|']'|'{'|'}'));
+                    let has_bracket = tok.text.contains(['(', ')', '[', ']', '{', '}']);
                     if !has_bracket {
                         new_tokens.push(tok);
                         continue;
@@ -6173,8 +6340,12 @@ fn load_fonts(
 }
 
 use std::cell::RefCell;
+
+/// (ui, code, icon, big, icon_big) font slot ids.
+type FontSlotIds = (u64, u64, u64, u64, u64);
+
 thread_local! {
-    static FONT_SLOTS: RefCell<Option<(u64, u64, u64, u64, u64)>> = const { RefCell::new(None) };
+    static FONT_SLOTS: RefCell<Option<FontSlotIds>> = const { RefCell::new(None) };
 }
 
 /// Build a StyleContext from NativeConfig and loaded fonts.

@@ -274,4 +274,135 @@ mod tests {
         let (l, _c) = next_block_end(&lines, 1);
         assert_eq!(l, 3);
     }
+
+    #[test]
+    fn find_in_lines_empty_pattern_returns_none() {
+        let lines = vec!["hello\n".to_string()];
+        let result = find_in_lines(&lines, 1, 1, "", &SearchOptions::default());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_in_lines_empty_haystack_returns_none() {
+        let result = find_in_lines(&[], 1, 1, "anything", &SearchOptions::default());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_in_lines_no_case_mixed_case_pattern() {
+        let lines = vec!["Hello WORLD\n".to_string()];
+        let opts = SearchOptions {
+            no_case: true,
+            ..Default::default()
+        };
+        let result = find_in_lines(&lines, 1, 1, "WoRlD", &opts).expect("should match");
+        assert_eq!(result.line1, 1);
+        assert_eq!(result.col1, 7);
+    }
+
+    #[test]
+    fn find_in_lines_no_match_anywhere_returns_none() {
+        let lines = vec!["abc\n".to_string(), "def\n".to_string(), "ghi\n".to_string()];
+        let result = find_in_lines(&lines, 1, 1, "xyz", &SearchOptions::default());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_in_lines_regex_no_match() {
+        let lines = vec!["only letters\n".to_string()];
+        let opts = SearchOptions {
+            regex: true,
+            ..Default::default()
+        };
+        let result = find_in_lines(&lines, 1, 1, r"\d+", &opts);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_in_lines_finds_match_on_later_line() {
+        let lines = vec!["aaa\n".to_string(), "bbb\n".to_string(), "ccc\n".to_string()];
+        let result = find_in_lines(&lines, 1, 1, "ccc", &SearchOptions::default()).unwrap();
+        assert_eq!(result.line1, 3);
+        assert_eq!(result.col1, 1);
+    }
+
+    #[test]
+    fn find_in_lines_starts_from_offset_skips_earlier_match() {
+        let lines = vec!["aa bb aa bb\n".to_string()];
+        // Starting at col 5 should skip the first "aa" and find the second.
+        let result = find_in_lines(&lines, 1, 5, "aa", &SearchOptions::default()).unwrap();
+        assert_eq!(result.col1, 7);
+    }
+
+    #[test]
+    fn start_of_indentation_no_indent() {
+        // Line has no leading whitespace; first non-ws is at col 1.
+        // From any column past 1, the function returns 1 (already at indent start).
+        assert_eq!(start_of_indentation("hello", 5), 1);
+    }
+
+    #[test]
+    fn start_of_indentation_tab_indent() {
+        // Tab counts as one whitespace char → indent ends at col 2.
+        assert_eq!(start_of_indentation("\thello", 5), 2);
+    }
+
+    #[test]
+    fn start_of_indentation_all_whitespace_line() {
+        // No non-ws character → indent_end falls back to 1.
+        assert_eq!(start_of_indentation("    ", 3), 1);
+    }
+
+    #[test]
+    fn start_of_indentation_cursor_in_indent() {
+        // Cursor is inside the indent (col 2 of "    hello" = inside leading spaces).
+        // Should return 1 (at-or-before indent → go to col 1).
+        assert_eq!(start_of_indentation("    hello", 2), 1);
+    }
+
+    #[test]
+    fn previous_block_start_at_first_line_returns_top() {
+        let lines = vec!["only line\n".to_string()];
+        let (l, c) = previous_block_start(&lines, 1);
+        assert_eq!((l, c), (1, 1));
+    }
+
+    #[test]
+    fn previous_block_start_no_blank_lines_returns_top() {
+        let lines = vec!["a\n".to_string(), "b\n".to_string(), "c\n".to_string()];
+        let (l, c) = previous_block_start(&lines, 3);
+        // No blank line above → walks up to line 1.
+        assert_eq!((l, c), (1, 1));
+    }
+
+    #[test]
+    fn next_block_end_at_last_line_returns_last() {
+        let lines = vec!["a\n".to_string(), "b\n".to_string()];
+        let (l, _c) = next_block_end(&lines, 2);
+        assert_eq!(l, 2);
+    }
+
+    #[test]
+    fn next_block_end_no_blank_lines_returns_last() {
+        let lines = vec!["a\n".to_string(), "b\n".to_string(), "c\n".to_string()];
+        let (l, _c) = next_block_end(&lines, 1);
+        assert_eq!(l, 3);
+    }
+
+    #[test]
+    fn is_non_word_multi_byte_char() {
+        let nw = b" \t\n";
+        // 'a' is not non-word.
+        assert!(!is_non_word("a".as_bytes(), nw));
+    }
+
+    #[test]
+    fn search_options_default_all_false() {
+        let o = SearchOptions::default();
+        assert!(!o.no_case);
+        assert!(!o.regex);
+        assert!(!o.reverse);
+        assert!(!o.wrap);
+        assert!(!o.pattern);
+    }
 }

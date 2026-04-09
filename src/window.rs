@@ -807,7 +807,21 @@ fn translate_event_native(
             _ => return None,
         };
         return if t == SDL_EVENT_MOUSE_BUTTON_DOWN {
-            Some(EditorEvent::MousePressed { button, x: x as f64 * scale_x, y: y as f64 * scale_y, clicks: 1 })
+            // SDL only carries keyboard modifiers on key events, so query the live state here.
+            let keymod = unsafe { SDL_GetModState() };
+            let modifiers = crate::editor::event::Modifiers {
+                shift: (keymod.0 & SDL_KMOD_SHIFT.0) != 0,
+                ctrl: (keymod.0 & SDL_KMOD_CTRL.0) != 0,
+                alt: (keymod.0 & SDL_KMOD_ALT.0) != 0,
+                gui: (keymod.0 & SDL_KMOD_GUI.0) != 0,
+            };
+            Some(EditorEvent::MousePressed {
+                button,
+                x: x as f64 * scale_x,
+                y: y as f64 * scale_y,
+                clicks: 1,
+                modifiers,
+            })
         } else {
             Some(EditorEvent::MouseReleased { button, x: x as f64 * scale_x, y: y as f64 * scale_y })
         };

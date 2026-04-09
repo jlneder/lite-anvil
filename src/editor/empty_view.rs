@@ -9,6 +9,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("%s for shortcuts", "core:show-shortcuts-help"),
     ("%s to open a file", "core:open-file"),
     ("%s to open a file from the project", "core:find-file"),
+    ("%s to open a recent file or folder", "core:open-recent"),
     ("%s to toggle focus mode", "root:toggle-focus-mode"),
     (
         "%s to close the project folder",

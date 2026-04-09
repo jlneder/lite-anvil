@@ -19,7 +19,7 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 ## Features
 
 - **Built-in LSP** with diagnostics, completion, hover, go-to-definition, references, inlay hints
-- **Embedded PTY terminal** with ANSI colors, scrollback, and multi-terminal support (Linux/macOS only)
+- **Embedded terminal** with ANSI colors, scrollback, and multi-terminal support
 - **Indent guides** at each indentation level
 - **Line sorting** on selected lines
 - **Project-wide search** (Ctrl+Shift+F) with grep-based results
@@ -40,6 +40,7 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 | `Ctrl+P` | Command palette |
 | `Ctrl+O` | Open file (autocomplete navigator) |
 | `Ctrl+Shift+O` | Open project folder |
+| `Ctrl+Shift+R` | Open recent file or folder |
 | `Ctrl+Shift+F` | Project-wide search |
 | `Ctrl+Shift+P` | Cycle color theme |
 | `Ctrl+=` / `Ctrl+-` | Font zoom in / out |

@@ -838,3 +838,352 @@ impl TerminalBufferInner {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::terminal::unpack_color;
+
+    /// 16-color test palette: indices 0..7 standard, 8..15 bright.
+    /// Distinct values per slot make assertion failures easy to read.
+    const PALETTE: [[u8; 4]; 16] = [
+        [0x00, 0x00, 0x00, 0xff], // 0 black
+        [0xcc, 0x00, 0x00, 0xff], // 1 red
+        [0x00, 0xcc, 0x00, 0xff], // 2 green
+        [0xcc, 0xcc, 0x00, 0xff], // 3 yellow
+        [0x00, 0x00, 0xcc, 0xff], // 4 blue
+        [0xcc, 0x00, 0xcc, 0xff], // 5 magenta
+        [0x00, 0xcc, 0xcc, 0xff], // 6 cyan
+        [0xcc, 0xcc, 0xcc, 0xff], // 7 white
+        [0x55, 0x55, 0x55, 0xff], // 8 bright black
+        [0xff, 0x55, 0x55, 0xff], // 9 bright red
+        [0x55, 0xff, 0x55, 0xff], // 10 bright green
+        [0xff, 0xff, 0x55, 0xff], // 11 bright yellow
+        [0x55, 0x55, 0xff, 0xff], // 12 bright blue
+        [0xff, 0x55, 0xff, 0xff], // 13 bright magenta
+        [0x55, 0xff, 0xff, 0xff], // 14 bright cyan
+        [0xff, 0xff, 0xff, 0xff], // 15 bright white
+    ];
+    const DEFAULT_FG: [u8; 4] = [0xee, 0xee, 0xee, 0xff];
+
+    fn buf(cols: usize, rows: usize) -> TerminalBufferInner {
+        TerminalBufferInner::new(cols, rows, 100, PALETTE, DEFAULT_FG)
+    }
+
+    fn row_text(b: &TerminalBufferInner, row: usize) -> String {
+        b.screen()[row].iter().map(|c| char::from_u32(c.ch).unwrap_or('?')).collect()
+    }
+
+    #[test]
+    fn plain_ascii_writes_to_screen() {
+        let mut t = buf(10, 3);
+        t.process_output(b"hello");
+        assert_eq!(&row_text(&t, 0)[..5], "hello");
+        assert_eq!(t.cursor_row(), 1);
+        assert_eq!(t.cursor_col(), 6);
+    }
+
+    #[test]
+    fn cr_resets_column_lf_advances_row() {
+        let mut t = buf(10, 3);
+        t.process_output(b"hi\r\nbye");
+        assert_eq!(&row_text(&t, 0)[..2], "hi");
+        assert_eq!(&row_text(&t, 1)[..3], "bye");
+        assert_eq!(t.cursor_row(), 2);
+        assert_eq!(t.cursor_col(), 4);
+    }
+
+    #[test]
+    fn backspace_moves_cursor_left_without_erasing() {
+        let mut t = buf(10, 3);
+        t.process_output(b"abc\x08x");
+        // Backspace moves left without erasing; the next char overwrites.
+        assert_eq!(&row_text(&t, 0)[..3], "abx");
+    }
+
+    #[test]
+    fn tab_advances_to_next_tab_stop() {
+        let mut t = buf(20, 3);
+        t.process_output(b"ab\tx");
+        // After "ab" cursor is at col 3; tab jumps to col 9; then 'x' goes at col 9.
+        assert_eq!(t.cursor_col(), 10);
+        assert_eq!(t.screen()[0][8].ch, 'x' as u32);
+    }
+
+    #[test]
+    fn sgr_basic_color_sets_fg() {
+        let mut t = buf(10, 3);
+        t.process_output(b"\x1b[31mR");
+        assert_eq!(unpack_color(t.screen()[0][0].fg), Some(PALETTE[1]));
+    }
+
+    #[test]
+    fn sgr_reset_returns_to_default_fg() {
+        let mut t = buf(10, 3);
+        t.process_output(b"\x1b[31mR\x1b[0mD");
+        assert_eq!(unpack_color(t.screen()[0][0].fg), Some(PALETTE[1]));
+        assert_eq!(unpack_color(t.screen()[0][1].fg), Some(DEFAULT_FG));
+    }
+
+    #[test]
+    fn sgr_bright_color_uses_high_palette_slot() {
+        let mut t = buf(10, 3);
+        t.process_output(b"\x1b[91mB"); // bright red
+        assert_eq!(unpack_color(t.screen()[0][0].fg), Some(PALETTE[9]));
+    }
+
+    #[test]
+    fn sgr_256_color_indexed() {
+        let mut t = buf(10, 3);
+        // 256-color index 196 = (196-16) = 180; r = (180/36)%6 = 5 → 255, g = (180/6)%6 = 0 → 0, b = 180%6 = 0 → 0.
+        t.process_output(b"\x1b[38;5;196mX");
+        assert_eq!(unpack_color(t.screen()[0][0].fg), Some([0xff, 0x00, 0x00, 0xff]));
+    }
+
+    #[test]
+    fn sgr_256_color_grayscale_ramp() {
+        let mut t = buf(10, 3);
+        // 256-color index 232 = first grayscale, value = 8.
+        t.process_output(b"\x1b[38;5;232mG");
+        assert_eq!(unpack_color(t.screen()[0][0].fg), Some([8, 8, 8, 0xff]));
+    }
+
+    #[test]
+    fn sgr_truecolor_rgb() {
+        let mut t = buf(10, 3);
+        t.process_output(b"\x1b[38;2;100;200;50mY");
+        assert_eq!(unpack_color(t.screen()[0][0].fg), Some([100, 200, 50, 0xff]));
+    }
+
+    #[test]
+    fn sgr_truecolor_bg() {
+        let mut t = buf(10, 3);
+        t.process_output(b"\x1b[48;2;10;20;30mB");
+        assert_eq!(unpack_color(t.screen()[0][0].bg), Some([10, 20, 30, 0xff]));
+    }
+
+    #[test]
+    fn cursor_absolute_position() {
+        let mut t = buf(20, 10);
+        t.process_output(b"\x1b[5;7H");
+        assert_eq!(t.cursor_row(), 5);
+        assert_eq!(t.cursor_col(), 7);
+    }
+
+    #[test]
+    fn cursor_move_relative() {
+        let mut t = buf(20, 10);
+        t.process_output(b"\x1b[5;5H");
+        t.process_output(b"\x1b[2A"); // up 2
+        assert_eq!(t.cursor_row(), 3);
+        t.process_output(b"\x1b[3B"); // down 3
+        assert_eq!(t.cursor_row(), 6);
+        t.process_output(b"\x1b[4C"); // right 4
+        assert_eq!(t.cursor_col(), 9);
+        t.process_output(b"\x1b[2D"); // left 2
+        assert_eq!(t.cursor_col(), 7);
+    }
+
+    #[test]
+    fn cursor_position_clamped_at_edges() {
+        let mut t = buf(10, 5);
+        t.process_output(b"\x1b[100;100H"); // way past bottom-right
+        assert_eq!(t.cursor_row(), 5);
+        assert_eq!(t.cursor_col(), 10);
+    }
+
+    #[test]
+    fn save_and_restore_cursor_via_csi() {
+        let mut t = buf(20, 10);
+        t.process_output(b"\x1b[3;4H\x1b[s\x1b[8;9H\x1b[u");
+        assert_eq!(t.cursor_row(), 3);
+        assert_eq!(t.cursor_col(), 4);
+    }
+
+    #[test]
+    fn save_and_restore_cursor_via_esc_7_8() {
+        let mut t = buf(20, 10);
+        t.process_output(b"\x1b[3;4H\x1b7\x1b[8;9H\x1b8");
+        assert_eq!(t.cursor_row(), 3);
+        assert_eq!(t.cursor_col(), 4);
+    }
+
+    #[test]
+    fn erase_in_line_full() {
+        let mut t = buf(10, 3);
+        t.process_output(b"hello\x1b[2K");
+        for cell in &t.screen()[0] {
+            assert_eq!(cell.ch, ' ' as u32);
+        }
+    }
+
+    #[test]
+    fn erase_in_line_to_end() {
+        let mut t = buf(10, 3);
+        t.process_output(b"hello\x1b[3D\x1b[0K");
+        // After "hello" cursor is at col 6, then back 3 → col 3, then erase to end.
+        // Cells 0,1 should still be 'h','e'; cells 2..9 should be blank.
+        assert_eq!(t.screen()[0][0].ch, 'h' as u32);
+        assert_eq!(t.screen()[0][1].ch, 'e' as u32);
+        assert_eq!(t.screen()[0][2].ch, ' ' as u32);
+    }
+
+    #[test]
+    fn erase_in_display_full_clears_screen() {
+        let mut t = buf(10, 3);
+        t.process_output(b"abc\r\ndef\x1b[2J");
+        for row in t.screen() {
+            for cell in row {
+                assert_eq!(cell.ch, ' ' as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn alt_screen_toggle_preserves_main() {
+        let mut t = buf(10, 3);
+        t.process_output(b"main");
+        t.process_output(b"\x1b[?1049h"); // enter alt
+        // Alt screen is blank.
+        for cell in &t.screen()[0] {
+            assert_eq!(cell.ch, ' ' as u32);
+        }
+        t.process_output(b"alt");
+        t.process_output(b"\x1b[?1049l"); // exit alt
+        // Main screen restored.
+        assert_eq!(&row_text(&t, 0)[..4], "main");
+    }
+
+    #[test]
+    fn scroll_region_set_does_not_panic() {
+        let mut t = buf(10, 10);
+        t.process_output(b"\x1b[3;7r");
+        // Setting a scroll region returns the cursor to home per VT spec.
+        assert_eq!(t.cursor_row(), 1);
+        assert_eq!(t.cursor_col(), 1);
+    }
+
+    #[test]
+    fn dsr_cursor_position_report() {
+        let mut t = buf(20, 10);
+        t.process_output(b"\x1b[5;7H");
+        let reply = t.process_output_and_collect_replies(b"\x1b[6n");
+        assert_eq!(reply, b"\x1b[5;7R");
+    }
+
+    #[test]
+    fn da_device_attributes_query_returns_reply() {
+        let mut t = buf(20, 10);
+        let reply = t.process_output_and_collect_replies(b"\x1b[c");
+        assert!(!reply.is_empty(), "expected DA reply");
+        assert!(reply.starts_with(b"\x1b["), "reply should be CSI: {reply:?}");
+    }
+
+    #[test]
+    fn malformed_csi_does_not_panic() {
+        let mut t = buf(10, 3);
+        // Garbage params, oversized values, empty final-char sequences.
+        t.process_output(b"\x1b[;;;;m");
+        t.process_output(b"\x1b[99999A");
+        t.process_output(b"\x1b[99999B");
+        t.process_output(b"\x1b[99999C");
+        // Reset to a known state, then verify the parser still writes plain text.
+        t.process_output(b"\x1b[2J\x1b[Hok");
+        assert_eq!(&row_text(&t, 0)[..2], "ok");
+    }
+
+    #[test]
+    fn split_escape_sequence_across_calls() {
+        let mut t = buf(10, 3);
+        t.process_output(b"\x1b[3");
+        t.process_output(b"1m");
+        t.process_output(b"R");
+        // The split sequence must still apply red.
+        assert_eq!(unpack_color(t.screen()[0][0].fg), Some(PALETTE[1]));
+    }
+
+    #[test]
+    fn newline_at_bottom_scrolls_screen() {
+        let mut t = buf(5, 3);
+        t.process_output(b"r1\r\nr2\r\nr3\r\nr4");
+        // After 4 rows in a 3-row screen, "r1" should be scrolled into history;
+        // visible screen should now show r2, r3, r4.
+        assert_eq!(&row_text(&t, 0)[..2], "r2");
+        assert_eq!(&row_text(&t, 1)[..2], "r3");
+        assert_eq!(&row_text(&t, 2)[..2], "r4");
+    }
+
+    #[test]
+    fn box_drawing_chars_normalize_to_ascii() {
+        let mut t = buf(10, 3);
+        // Box-drawing chars from normalize_char's table.
+        t.process_output("│─┌".as_bytes());
+        assert_eq!(t.screen()[0][0].ch, '|' as u32);
+        assert_eq!(t.screen()[0][1].ch, '-' as u32);
+        assert_eq!(t.screen()[0][2].ch, '+' as u32);
+    }
+
+    #[test]
+    fn utf8_multi_byte_char_writes_one_cell() {
+        let mut t = buf(10, 3);
+        t.process_output("é".as_bytes());
+        assert_eq!(t.screen()[0][0].ch, 'é' as u32);
+        assert_eq!(t.cursor_col(), 2);
+    }
+
+    #[test]
+    fn delete_chars_shifts_left_and_blanks_tail() {
+        let mut t = buf(10, 3);
+        t.process_output(b"abcdefgh\x1b[1G\x1b[2P");
+        // Delete 2 chars from col 1 → "cdefgh  "
+        assert_eq!(&row_text(&t, 0)[..6], "cdefgh");
+        assert_eq!(t.screen()[0][8].ch, ' ' as u32);
+    }
+
+    #[test]
+    fn insert_chars_shifts_right() {
+        let mut t = buf(10, 3);
+        t.process_output(b"abcdef\x1b[1G\x1b[2@");
+        // Insert 2 chars at col 1 → "  abcdef"
+        assert_eq!(t.screen()[0][0].ch, ' ' as u32);
+        assert_eq!(t.screen()[0][1].ch, ' ' as u32);
+        assert_eq!(t.screen()[0][2].ch, 'a' as u32);
+    }
+
+    #[test]
+    fn esc_c_full_reset() {
+        let mut t = buf(10, 3);
+        t.process_output(b"\x1b[31mhello\x1b[5;5H");
+        t.process_output(b"\x1bc");
+        // Cursor home, default fg, screen blank.
+        assert_eq!(t.cursor_row(), 1);
+        assert_eq!(t.cursor_col(), 1);
+        assert_eq!(t.screen()[0][0].ch, ' ' as u32);
+    }
+
+    #[test]
+    fn resize_preserves_recent_rows() {
+        let mut t = buf(10, 5);
+        t.process_output(b"r1\r\nr2\r\nr3\r\nr4\r\nr5");
+        t.resize(10, 3);
+        // The bottom 3 rows (r3, r4, r5) should be retained.
+        assert_eq!(&row_text(&t, 0)[..2], "r3");
+        assert_eq!(&row_text(&t, 1)[..2], "r4");
+        assert_eq!(&row_text(&t, 2)[..2], "r5");
+    }
+
+    #[test]
+    fn empty_input_is_noop() {
+        let mut t = buf(10, 3);
+        t.process_output(b"");
+        assert_eq!(t.cursor_row(), 1);
+        assert_eq!(t.cursor_col(), 1);
+    }
+
+    #[test]
+    fn null_byte_is_ignored() {
+        let mut t = buf(10, 3);
+        t.process_output(b"a\x00b");
+        assert_eq!(t.screen()[0][0].ch, 'a' as u32);
+        assert_eq!(t.screen()[0][1].ch, 'b' as u32);
+    }
+}

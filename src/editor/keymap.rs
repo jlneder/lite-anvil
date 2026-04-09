@@ -28,6 +28,18 @@ impl NativeKeymap {
         for (stroke, cmds) in DEFAULT_BINDINGS {
             km.add(stroke, cmds);
         }
+        // On macOS, alias ctrl+ bindings to cmd+ (Command key).
+        if cfg!(target_os = "macos") {
+            let ctrl_bindings: Vec<(String, Vec<String>)> = km.map.iter()
+                .filter(|(k, _)| k.starts_with("ctrl+"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            for (stroke, cmds) in ctrl_bindings {
+                let cmd_stroke = format!("cmd+{}", &stroke[5..]);
+                let cmd_refs: Vec<&str> = cmds.iter().map(String::as_str).collect();
+                km.add(&cmd_stroke, &cmd_refs);
+            }
+        }
         km
     }
 
@@ -159,8 +171,7 @@ const DEFAULT_BINDINGS: &[(&str, &[&str])] = &[
     ("ctrl+p", &["core:find-command"]),
     ("ctrl+q", &["core:quit"]),
     ("ctrl+o", &["core:open-file"]),
-    ("ctrl+shift+r", &["core:open-recent-file"]),
-    ("ctrl+alt+shift+r", &["core:open-recent-folder"]),
+    ("ctrl+shift+r", &["core:open-recent"]),
     ("ctrl+n", &["core:new-doc"]),
     ("ctrl+shift+n", &["core:new-window"]),
     ("ctrl+alt+o", &["core:open-file-dialog"]),
@@ -274,7 +285,7 @@ const DEFAULT_BINDINGS: &[(&str, &[&str])] = &[
     ("shift+home", &["doc:select-to-start-of-indentation"]),
     ("shift+end", &["doc:select-to-end-of-line"]),
     ("ctrl+shift+home", &["doc:select-to-start-of-doc"]),
-    ("ctrl+shift+end", &["doc:select-to-end-of-doc"]),
+    ("ctrl+shift+end", &["doc:select-to-end-of-line"]),
     ("shift+pageup", &["doc:select-to-previous-page"]),
     ("shift+pagedown", &["doc:select-to-next-page"]),
     ("ctrl+shift+up", &["doc:create-cursor-previous-line"]),
@@ -394,5 +405,128 @@ mod tests {
     #[test]
     fn format_stroke_capitalizes() {
         assert_eq!(format_stroke("ctrl+shift+a"), "Ctrl+Shift+A");
+    }
+
+    #[test]
+    fn normalize_stroke_is_order_independent() {
+        let a = normalize_stroke("ctrl+shift+a");
+        let b = normalize_stroke("shift+ctrl+a");
+        let c = normalize_stroke("a+ctrl+shift");
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+    }
+
+    #[test]
+    fn normalize_stroke_orders_alt_after_ctrl_before_shift() {
+        assert_eq!(normalize_stroke("shift+alt+ctrl+x"), "ctrl+alt+shift+x");
+    }
+
+    #[test]
+    fn on_key_pressed_unbound_returns_none() {
+        let mut km = NativeKeymap::with_defaults();
+        let mods = Modifiers {
+            ctrl: true,
+            shift: true,
+            alt: true,
+            gui: false,
+        };
+        // Ctrl+Alt+Shift+J is not a default binding.
+        assert!(km.on_key_pressed("j", mods).is_none());
+    }
+
+    #[test]
+    fn on_key_pressed_no_mods_returns_none_for_unbound() {
+        let mut km = NativeKeymap::with_defaults();
+        // A bare letter has no default binding (text input goes through a different path).
+        assert!(km.on_key_pressed("z", Modifiers::default()).is_none());
+    }
+
+    #[test]
+    fn open_recent_is_bound_to_ctrl_shift_r() {
+        // Regression test: this binding was previously dead (super+o → unreachable).
+        let mut km = NativeKeymap::with_defaults();
+        let mods = Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        let cmds = km.on_key_pressed("r", mods).expect("ctrl+shift+r unbound");
+        assert!(cmds.iter().any(|c| c == "core:open-recent"));
+    }
+
+    #[test]
+    fn reverse_map_resolves_open_recent() {
+        let km = NativeKeymap::with_defaults();
+        let display = km
+            .get_binding_display("core:open-recent")
+            .expect("core:open-recent has no binding");
+        assert_eq!(display, "Ctrl+Shift+R");
+    }
+
+    #[test]
+    fn dead_open_recent_subcommands_are_unbound() {
+        // Verify the broken bindings were actually removed and don't shadow the unified picker.
+        let km = NativeKeymap::with_defaults();
+        assert!(km.get_bindings("core:open-recent-file").is_none());
+        assert!(km.get_bindings("core:open-recent-folder").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_alias_loop_creates_cmd_bindings() {
+        // The 1.5.5 approach: every ctrl+ default also gets a parallel cmd+ entry.
+        let km = NativeKeymap::with_defaults();
+        for ctrl_stroke in ["ctrl+s", "ctrl+q", "ctrl+o", "ctrl+shift+r", "ctrl+p"] {
+            let cmd_stroke = format!("cmd+{}", &ctrl_stroke[5..]);
+            assert!(
+                km.map.contains_key(&cmd_stroke),
+                "expected {cmd_stroke} alias for {ctrl_stroke}",
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_alias_preserves_command_targets() {
+        // The cmd+ alias must point at the same commands as the ctrl+ original.
+        let km = NativeKeymap::with_defaults();
+        let ctrl_save = km.map.get("ctrl+s").expect("ctrl+s missing");
+        let cmd_save = km.map.get("cmd+s").expect("cmd+s missing");
+        assert_eq!(ctrl_save, cmd_save);
+    }
+
+    #[test]
+    fn add_from_config_string_value() {
+        let mut km = NativeKeymap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert("ctrl+j".to_string(), toml::Value::String("doc:join-lines".to_string()));
+        km.add_from_config(&bindings);
+        assert_eq!(km.map.get("ctrl+j").map(|v| v.as_slice()), Some(["doc:join-lines".to_string()].as_slice()));
+    }
+
+    #[test]
+    fn add_from_config_array_value() {
+        let mut km = NativeKeymap::new();
+        let mut bindings = HashMap::new();
+        bindings.insert(
+            "escape".to_string(),
+            toml::Value::Array(vec![
+                toml::Value::String("command:escape".to_string()),
+                toml::Value::String("doc:select-none".to_string()),
+            ]),
+        );
+        km.add_from_config(&bindings);
+        let v = km.map.get("escape").expect("escape missing");
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0], "command:escape");
+        assert_eq!(v[1], "doc:select-none");
+    }
+
+    #[test]
+    fn iter_bindings_includes_defaults() {
+        let km = NativeKeymap::with_defaults();
+        let count = km.iter_bindings().count();
+        // Sanity floor — defaults table is large.
+        assert!(count > 50, "expected >50 default bindings, got {count}");
     }
 }

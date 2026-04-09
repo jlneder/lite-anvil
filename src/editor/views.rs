@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn drag_panel_clamps() {
         let offset = drag_panel_offset(0.0, 300.0, 200.0, -50.0);
-        assert!(offset >= -100.0 && offset <= 0.0);
+        assert!((-100.0..=0.0).contains(&offset));
     }
 
     // ── Tree model tests ─────────────────────────────────────────────────────

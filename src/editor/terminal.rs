@@ -410,4 +410,81 @@ mod tests {
         assert_eq!(terms.len(), 1);
         assert_eq!(terms[0].1.as_bytes(), b"custom");
     }
+
+    #[cfg(unix)]
+    fn read_until(
+        term: &mut TerminalInner,
+        needle: &[u8],
+        timeout: std::time::Duration,
+    ) -> Vec<u8> {
+        use std::time::Instant;
+        let deadline = Instant::now() + timeout;
+        let mut accumulated = Vec::new();
+        while Instant::now() < deadline {
+            term.poll();
+            if let Some(bytes) = term.read(4096) {
+                if !bytes.is_empty() {
+                    accumulated.extend_from_slice(&bytes);
+                    if accumulated.windows(needle.len()).any(|w| w == needle) {
+                        return accumulated;
+                    }
+                    continue;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        accumulated
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_spawn_subprocess_output_is_readable() {
+        use std::ffi::CString;
+        use std::time::Duration;
+
+        let args = [
+            CString::new("/bin/sh").unwrap(),
+            CString::new("-c").unwrap(),
+            CString::new("printf 'hello-from-pty'").unwrap(),
+        ];
+        let mut term = spawn_terminal(&args, &TerminalSpawnOptions::default())
+            .expect("spawn_terminal failed");
+
+        let output = read_until(&mut term, b"hello-from-pty", Duration::from_secs(5));
+        term.cleanup();
+
+        assert!(
+            output
+                .windows(b"hello-from-pty".len())
+                .any(|w| w == b"hello-from-pty"),
+            "expected output to contain 'hello-from-pty', got: {:?}",
+            String::from_utf8_lossy(&output),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_write_then_read_roundtrip() {
+        use std::ffi::CString;
+        use std::time::Duration;
+
+        let args = [
+            CString::new("/bin/sh").unwrap(),
+            CString::new("-c").unwrap(),
+            CString::new("read line; printf 'got:%s' \"$line\"").unwrap(),
+        ];
+        let mut term = spawn_terminal(&args, &TerminalSpawnOptions::default())
+            .expect("spawn_terminal failed");
+
+        term.write(b"ping\n").expect("write failed");
+
+        let output = read_until(&mut term, b"got:ping", Duration::from_secs(5));
+        term.cleanup();
+
+        assert!(
+            output.windows(b"got:ping".len()).any(|w| w == b"got:ping"),
+            "expected output to contain 'got:ping', got: {:?}",
+            String::from_utf8_lossy(&output),
+        );
+    }
 }

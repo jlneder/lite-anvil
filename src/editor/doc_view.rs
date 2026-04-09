@@ -15,6 +15,10 @@ pub struct DocView {
     pub blink_timer: f64,
     pub last_line_count: usize,
     pub gutter_width: f64,
+    /// Cached monospace character width in pixels for the code font, refreshed
+    /// each frame from the active draw context. Used for horizontal scroll math
+    /// in command handlers that don't have direct draw-context access.
+    pub code_char_w: f64,
     pub indent_size: usize,
     /// Fold ranges: Vec of (start_line, end_line) where lines start+1..=end are hidden.
     pub folds: Vec<(usize, usize)>,
@@ -34,6 +38,7 @@ impl DocView {
             blink_timer: 0.0,
             last_line_count: 0,
             gutter_width: 0.0,
+            code_char_w: 0.0,
             indent_size: 4,
             folds: Vec::new(),
             show_whitespace: false,
@@ -284,7 +289,7 @@ impl DocView {
             }
         }
 
-        // Scrollbar
+        // Vertical scrollbar
         if !lines.is_empty() {
             let total_lines = lines.last().map(|l| l.line_number).unwrap_or(1);
             let total_h = total_lines as f64 * line_h;
@@ -299,6 +304,42 @@ impl DocView {
                 let scroll_frac = self.scroll_y / (total_h - self.rect.h).max(1.0);
                 let thumb_y = self.rect.y + scroll_frac * (self.rect.h - thumb_h);
                 ctx.draw_rect(sb_x, thumb_y, sb_w, thumb_h, style.scrollbar.to_array());
+            }
+        }
+
+        // Horizontal scrollbar — measure the widest visible rendered line; if it
+        // exceeds the text area, draw a track + thumb at the bottom edge.
+        if !lines.is_empty() {
+            let mut max_line_w = 0.0_f64;
+            for line in lines {
+                let mut w = 0.0_f64;
+                for token in &line.tokens {
+                    w += ctx.font_width(style.code_font, &token.text);
+                }
+                if w > max_line_w {
+                    max_line_w = w;
+                }
+            }
+            let text_w = (self.rect.w - gutter_w - style.padding_x * 2.0
+                - style.scrollbar_size)
+                .max(0.0);
+            if max_line_w > text_w && text_w > 0.0 {
+                let sb_h = style.scrollbar_size;
+                let sb_x = self.rect.x + gutter_w + style.padding_x;
+                let sb_y = self.rect.y + self.rect.h - sb_h;
+                let track_w = text_w;
+                ctx.draw_rect(
+                    sb_x,
+                    sb_y,
+                    track_w,
+                    sb_h,
+                    style.scrollbar_track.to_array(),
+                );
+                let ratio = (text_w / max_line_w).clamp(0.0, 1.0);
+                let thumb_w = (track_w * ratio).max(20.0);
+                let scroll_frac = self.scroll_x / (max_line_w - text_w).max(1.0);
+                let thumb_x = sb_x + scroll_frac * (track_w - thumb_w);
+                ctx.draw_rect(thumb_x, sb_y, thumb_w, sb_h, style.scrollbar.to_array());
             }
         }
     }

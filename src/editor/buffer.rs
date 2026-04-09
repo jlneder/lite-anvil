@@ -1203,4 +1203,214 @@ mod tests {
         let _ = fs::remove_file(&tmp);
         let _ = fs::remove_file(&out);
     }
+
+    #[test]
+    fn undo_restores_previous_state() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["hello\n".to_string()];
+        push_undo(&mut state);
+        state.lines = vec!["hello world\n".to_string()];
+
+        undo(&mut state);
+        assert_eq!(state.lines, vec!["hello\n"]);
+    }
+
+    #[test]
+    fn redo_restores_undone_state() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["v1\n".to_string()];
+        push_undo(&mut state);
+        state.lines = vec!["v2\n".to_string()];
+
+        undo(&mut state);
+        assert_eq!(state.lines, vec!["v1\n"]);
+        redo(&mut state);
+        assert_eq!(state.lines, vec!["v2\n"]);
+    }
+
+    #[test]
+    fn undo_redo_full_round_trip() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["a\n".to_string()];
+
+        push_undo(&mut state);
+        state.lines = vec!["ab\n".to_string()];
+        push_undo(&mut state);
+        state.lines = vec!["abc\n".to_string()];
+        push_undo(&mut state);
+        state.lines = vec!["abcd\n".to_string()];
+
+        // Undo all the way back.
+        undo(&mut state);
+        assert_eq!(state.lines, vec!["abc\n"]);
+        undo(&mut state);
+        assert_eq!(state.lines, vec!["ab\n"]);
+        undo(&mut state);
+        assert_eq!(state.lines, vec!["a\n"]);
+
+        // Redo all the way forward.
+        redo(&mut state);
+        assert_eq!(state.lines, vec!["ab\n"]);
+        redo(&mut state);
+        assert_eq!(state.lines, vec!["abc\n"]);
+        redo(&mut state);
+        assert_eq!(state.lines, vec!["abcd\n"]);
+    }
+
+    #[test]
+    fn undo_at_empty_history_is_noop() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["hello\n".to_string()];
+        let before = state.lines.clone();
+        undo(&mut state);
+        assert_eq!(state.lines, before);
+    }
+
+    #[test]
+    fn redo_at_empty_history_is_noop() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["hello\n".to_string()];
+        let before = state.lines.clone();
+        redo(&mut state);
+        assert_eq!(state.lines, before);
+    }
+
+    #[test]
+    fn push_undo_clears_redo_stack() {
+        let mut state = default_buffer_state();
+        state.lines = vec!["v1\n".to_string()];
+        push_undo(&mut state);
+        state.lines = vec!["v2\n".to_string()];
+        undo(&mut state);
+        assert_eq!(state.redo.len(), 1);
+
+        // Editing after an undo should drop the redo stack ("forking" history).
+        push_undo(&mut state);
+        state.lines = vec!["v1-fork\n".to_string()];
+        assert!(state.redo.is_empty());
+    }
+
+    #[test]
+    fn reset_history_clears_both_stacks() {
+        let mut state = default_buffer_state();
+        push_undo(&mut state);
+        state.lines = vec!["edited\n".to_string()];
+        push_undo(&mut state);
+        undo(&mut state);
+
+        assert!(!state.undo.is_empty());
+        assert!(!state.redo.is_empty());
+        reset_history(&mut state);
+        assert!(state.undo.is_empty());
+        assert!(state.redo.is_empty());
+    }
+
+    #[test]
+    fn clamp_history_under_cap_keeps_all() {
+        let mut history: Vec<Vec<u8>> = (0..100).map(|i| vec![i as u8]).collect();
+        clamp_history(&mut history);
+        assert_eq!(history.len(), 100);
+    }
+
+    #[test]
+    fn clamp_history_at_cap_keeps_all() {
+        let mut history: Vec<Vec<u8>> = (0..2_000).map(|i| vec![(i % 256) as u8]).collect();
+        clamp_history(&mut history);
+        assert_eq!(history.len(), 2_000);
+    }
+
+    #[test]
+    fn clamp_history_over_cap_drops_oldest() {
+        let mut history: Vec<Vec<u8>> = (0..2_005).map(|i| vec![(i % 256) as u8]).collect();
+        clamp_history(&mut history);
+        assert_eq!(history.len(), 2_000);
+        // The oldest 5 entries (0..5) should have been dropped; entry 0 is now what was index 5.
+        assert_eq!(history[0], vec![5u8]);
+    }
+
+    #[test]
+    fn serialize_deserialize_history_round_trip() {
+        let undo: Vec<Vec<u8>> = vec![
+            b"snapshot-one".to_vec(),
+            b"snapshot-two-with-more-bytes".to_vec(),
+            vec![0u8, 1, 2, 3, 255],
+        ];
+        let redo: Vec<Vec<u8>> = vec![b"redo-a".to_vec(), b"".to_vec()];
+        let blob = serialize_history(&undo, &redo);
+        let (out_undo, out_redo) = deserialize_history(&blob).expect("deserialize failed");
+        assert_eq!(out_undo, undo);
+        assert_eq!(out_redo, redo);
+    }
+
+    #[test]
+    fn serialize_deserialize_empty_history() {
+        let blob = serialize_history(&[], &[]);
+        let (u, r) = deserialize_history(&blob).expect("deserialize failed");
+        assert!(u.is_empty());
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn deserialize_history_rejects_short_input() {
+        assert!(deserialize_history(&[]).is_none());
+        assert!(deserialize_history(&[0, 0, 0]).is_none()); // less than 8-byte header
+    }
+
+    #[test]
+    fn deserialize_history_rejects_truncated_entry() {
+        // Header claims 1 undo, 0 redo; entry length claims 100 but no payload.
+        let mut bad = Vec::new();
+        bad.extend_from_slice(&1u32.to_le_bytes());
+        bad.extend_from_slice(&0u32.to_le_bytes());
+        bad.extend_from_slice(&100u32.to_le_bytes());
+        // No payload follows.
+        assert!(deserialize_history(&bad).is_none());
+    }
+
+    #[test]
+    fn serialize_history_caps_at_5mb() {
+        // One entry that itself exceeds the 5MB cap should be omitted entirely.
+        let huge = vec![0u8; 6 * 1024 * 1024];
+        let blob = serialize_history(&[huge], &[]);
+        let (u, r) = deserialize_history(&blob).expect("deserialize failed");
+        // Cap kicks in: huge entry skipped.
+        assert!(u.is_empty());
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn serialize_history_drops_oldest_undo_first_under_cap() {
+        // 3 small recent entries + 1 huge old entry: the huge one should be dropped, the small kept.
+        let huge = vec![0u8; 6 * 1024 * 1024];
+        let small_a = b"recent-a".to_vec();
+        let small_b = b"recent-b".to_vec();
+        let small_c = b"recent-c".to_vec();
+        let undo = vec![huge, small_a.clone(), small_b.clone(), small_c.clone()];
+        let blob = serialize_history(&undo, &[]);
+        let (u, _) = deserialize_history(&blob).expect("deserialize failed");
+        // The serializer iterates from most recent backward, so the 3 small entries fit; the huge one breaks the loop.
+        assert_eq!(u, vec![small_a, small_b, small_c]);
+    }
+
+    #[test]
+    fn push_undo_on_real_state_is_recoverable() {
+        // End-to-end: drive push_undo via the real BufferState helper, then round-trip.
+        let mut state = default_buffer_state();
+        state.lines = vec!["v0\n".to_string()];
+        push_undo(&mut state);
+        state.lines = vec!["v1\n".to_string()];
+        push_undo(&mut state);
+        state.lines = vec!["v2\n".to_string()];
+
+        let blob = serialize_history(&state.undo, &state.redo);
+        let (rt_undo, rt_redo) = deserialize_history(&blob).expect("deserialize failed");
+
+        // Replace the live history with the round-tripped version and undo through it.
+        state.undo = rt_undo;
+        state.redo = rt_redo;
+        undo(&mut state);
+        assert_eq!(state.lines, vec!["v1\n"]);
+        undo(&mut state);
+        assert_eq!(state.lines, vec!["v0\n"]);
+    }
 }

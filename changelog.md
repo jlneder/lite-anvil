@@ -1,5 +1,19 @@
 # Change Log
 
+## [2.1.0] - 2026-04-09 — Windows terminal, Open Recent, macOS keys, many fixes.
+
+* Windows terminal support via piped stdin/stdout with reader thread (cmd.exe /Q).
+* Open Recent (Ctrl+Shift+R, auto-aliased to Cmd+Shift+R on macOS : combined recent files and folders list. Files open directly, folders switch project. Listed in the splash screen and README.
+* Recent files and folders persisted to session storage (max 100 files, 20 projects).
+* macOS: all Ctrl+ keybindings automatically aliased to Cmd+ (matching 1.5.5 behavior).
+* Fixed mouse selection and typing into selected text bugs.
+* Fixed selection and end key.
+* Fixed horizontal scrolling.
+* Fixed GitHub Actions: upgrade download-artifact to v6, gh-release to v3 (Node.js 24).
+* Fixed CI and release.sh version parsing for single-package Cargo.toml layout.
+* Local build scripts for linux, mac, and windows. install.sh uses the correct one.
+* Increased text coverage.
+
 ## [2.0.2] - 2026-04-09 — Windows build fix, caret/selection fixes.
 
 * Full dummy stubs for TerminalInstance fields (inner, tbuf) on non-Unix platforms.

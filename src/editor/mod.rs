@@ -73,6 +73,9 @@ pub mod terminal;
 pub mod terminal_buffer;
 #[allow(dead_code)]
 pub mod terminal_panel;
+#[cfg(windows)]
+#[allow(dead_code)]
+pub mod terminal_windows;
 #[allow(dead_code)]
 pub mod title_view;
 #[allow(dead_code)]
