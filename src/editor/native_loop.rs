@@ -5266,6 +5266,13 @@ fn handle_doc_command(
                 let max_col = char_count(b.lines[line - 1].trim_end_matches('\n')) + 1;
                 col = col.min(max_col);
             }
+            "doc:backspace" | "doc:delete" if anchor_line != cursor_line || anchor_col != cursor_col => {
+                // Selection active: delete the selected text.
+                buffer::push_undo(b);
+                buffer::delete_selection(b);
+                line = b.selections[0];
+                col = b.selections[1];
+            }
             "doc:backspace" => {
                 buffer::push_undo(b);
                 let n = buffer::cursor_count(b);

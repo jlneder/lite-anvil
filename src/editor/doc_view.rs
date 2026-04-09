@@ -182,7 +182,7 @@ impl DocView {
                     continue;
                 }
                 let start_col = if ln == sel.line1 { sel.col1 } else { 1 };
-                let end_col = if ln == sel.line2 { sel.col2 } else { usize::MAX };
+                let end_col = if ln == sel.line2 { sel.col2.saturating_sub(1) } else { usize::MAX };
                 let sel_text: String = line.tokens.iter().map(|t| t.text.as_str()).collect();
                 let sel_x = text_x + style.padding_x - self.scroll_x
                     + ctx.font_width(

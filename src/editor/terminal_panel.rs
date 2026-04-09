@@ -1,7 +1,37 @@
 #[cfg(not(unix))]
 mod dummy {
+    use crate::editor::terminal_buffer::Cell;
+
+    /// Stub terminal inner (no PTY on Windows).
+    pub struct DummyInner {
+        pub running: bool,
+    }
+
+    impl DummyInner {
+        pub fn write(&mut self, _data: &[u8]) -> Result<(), ()> { Ok(()) }
+        pub fn poll(&mut self) {}
+        pub fn read(&mut self, _max: usize) -> Option<Vec<u8>> { None }
+        pub fn cleanup(&mut self) {}
+    }
+
+    /// Stub terminal buffer (matches TerminalBufferInner API surface).
+    pub struct DummyBuf {
+        empty_screen: Vec<Vec<Cell>>,
+    }
+
+    impl DummyBuf {
+        pub fn new() -> Self { Self { empty_screen: Vec::new() } }
+        pub fn process_output(&mut self, _bytes: &[u8]) {}
+        pub fn resize(&mut self, _cols: usize, _rows: usize) {}
+        pub fn screen(&self) -> &Vec<Vec<Cell>> { &self.empty_screen }
+        pub fn cursor_row(&self) -> usize { 0 }
+        pub fn cursor_col(&self) -> usize { 0 }
+    }
+
     /// Stub terminal instance for non-Unix platforms.
     pub struct TerminalInstance {
+        pub inner: DummyInner,
+        pub tbuf: DummyBuf,
         pub title: String,
     }
 

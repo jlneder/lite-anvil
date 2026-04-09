@@ -19,7 +19,7 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 ## Features
 
 - **Built-in LSP** with diagnostics, completion, hover, go-to-definition, references, inlay hints
-- **Embedded PTY terminal** with ANSI colors, scrollback, and multi-terminal support
+- **Embedded PTY terminal** with ANSI colors, scrollback, and multi-terminal support (Linux/macOS only)
 - **Indent guides** at each indentation level
 - **Line sorting** on selected lines
 - **Project-wide search** (Ctrl+Shift+F) with grep-based results

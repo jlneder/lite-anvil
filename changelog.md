@@ -1,5 +1,12 @@
 # Change Log
 
+## [2.0.2] - 2026-04-09 — Windows build fix, caret/selection fixes.
+
+* Full dummy stubs for TerminalInstance fields (inner, tbuf) on non-Unix platforms.
+* Terminal emulator unavailable on Windows (conpty planned).
+* Fix: delete/backspace with active selection now deletes the selection instead of a single character.
+* Fix: selection highlight no longer extends one character past the cursor position.
+
 ## [2.0.1] - 2026-04-09 — Windows build fix.
 
 * Fix Windows compilation: gate Unix-only PTY/process code behind `#[cfg(unix)]`.
