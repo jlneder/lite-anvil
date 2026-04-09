@@ -1,5 +1,15 @@
 # Change Log
 
+## [2.1.3] - 2026-04-09 — File picker editing, sidebar overflow, docs rebuild.
+
+* Fixed file/folder open picker text editing: arrow keys, Home, End, Delete, and Ctrl+Left / Ctrl+Right now work.
+* Fixed file/folder open picker root path: now opens with the absolute project directory instead of `./`.
+* Fixed sidebar entry overflow: long folder/file names.
+* Refactored sidebar toolbar click handler to delegate to the unified `dispatch_command!` macro.
+* New `scripts/build-docs.sh`: rebuilds the static documentation site (`docs/`) from `docs_src/` via `mkdocs build`.
+* Scroll weirdness fixes.
+* Fixed horizontal scroll: long lines no longer slide under the line-number gutter;
+
 ## [2.1.2] - 2026-04-09 — Dispatch refactor + recent folder restore + version + keybinding fixes.
 
 * Refactored command dispatch into a single `dispatch_command!` macro. Both the keyboard binding path and the command palette now share one match block instead of duplicating logic in two places. Adding a new command is now a one-place edit.

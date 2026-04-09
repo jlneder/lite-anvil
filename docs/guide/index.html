@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Keyboard shortcuts, LSP language server setup, test runner configuration, syntax highlighting, and Lua plugin development for Lite-Anvil.">
+        <meta name="description" content="Keyboard shortcuts, LSP language server setup, configuration, and syntax highlighting for Lite-Anvil.">
       
       
         <meta name="author" content="Dan Pozmanter">
@@ -18,7 +18,7 @@
         <link rel="prev" href="../installation/">
       
       
-        <link rel="next" href="../api/">
+        <link rel="next" href="../about/">
       
       
         
@@ -273,25 +273,6 @@
     
   
   User Guide
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../api/" class="md-tabs__link">
-        
-  
-  
-    
-  
-  API Reference
 
       </a>
     </li>
@@ -650,22 +631,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#plugins" class="md-nav__link">
+  <a href="#configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Plugins
+        Configuration
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Plugins">
+    <nav class="md-nav" aria-label="Configuration">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#plugin-locations" class="md-nav__link">
+  <a href="#config-location" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Plugin locations
+        Config location
       
     </span>
   </a>
@@ -673,10 +654,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#mod-version" class="md-nav__link">
+  <a href="#command-line-options" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mod-version
+        Command line options
       
     </span>
   </a>
@@ -684,32 +665,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-plugin" class="md-nav__link">
+  <a href="#themes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example plugin
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#disabling-plugins" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Disabling plugins
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#available-apis" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Available APIs
+        Themes
       
     </span>
   </a>
@@ -725,33 +684,6 @@
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API Reference
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1334,10 +1266,9 @@
 </tr>
 </tbody>
 </table>
-<p>Configure a custom command: set <code>config.plugins.test_runner.custom_command</code> in <code>config.lua</code>.</p>
-<h2 id="plugins">Plugins<a class="headerlink" href="#plugins" title="Permanent link">&para;</a></h2>
-<p>Lite-Anvil is extensible via Lua plugins. All core modules are Rust, but user plugins and configuration use Lua.</p>
-<h3 id="plugin-locations">Plugin locations<a class="headerlink" href="#plugin-locations" title="Permanent link">&para;</a></h3>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>Lite-Anvil is configured via a TOML file. Open it from the sidebar settings icon or via the command palette: <strong>Open User Settings</strong>.</p>
+<h3 id="config-location">Config location<a class="headerlink" href="#config-location" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -1348,60 +1279,25 @@
 <tbody>
 <tr>
 <td>Linux</td>
-<td><code>~/.config/lite-anvil/plugins/</code></td>
+<td><code>~/.config/lite-anvil/config.toml</code></td>
 </tr>
 <tr>
 <td>macOS</td>
-<td><code>~/Library/Application Support/lite-anvil/plugins/</code></td>
+<td><code>~/Library/Application Support/lite-anvil/config.toml</code></td>
 </tr>
 <tr>
 <td>Windows</td>
-<td><code>%APPDATA%\lite-anvil\plugins\</code></td>
+<td><code>%APPDATA%\lite-anvil\config.toml</code></td>
 </tr>
 </tbody>
 </table>
-<p>Each plugin is a single <code>.lua</code> file or a directory with an <code>init.lua</code>.</p>
-<h3 id="mod-version">Mod-version<a class="headerlink" href="#mod-version" title="Permanent link">&para;</a></h3>
-<p>Every plugin must declare its compatible API version. The current mod-version is <strong>4.0.0</strong>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- mod-version:4</span>
+<h3 id="command-line-options">Command line options<a class="headerlink" href="#command-line-options" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>lite-anvil [file...]          Open files
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>lite-anvil -v                 Verbose mode (log LSP errors to stderr)
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>lite-anvil --verbose          Same as -v
 </code></pre></div>
-<h3 id="example-plugin">Example plugin<a class="headerlink" href="#example-plugin" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">-- mod-version:4</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kd">local</span> <span class="n">core</span> <span class="o">=</span> <span class="nb">require</span> <span class="s2">&quot;core&quot;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="kd">local</span> <span class="n">command</span> <span class="o">=</span> <span class="nb">require</span> <span class="s2">&quot;core.command&quot;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kd">local</span> <span class="n">keymap</span> <span class="o">=</span> <span class="nb">require</span> <span class="s2">&quot;core.keymap&quot;</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">command</span><span class="p">.</span><span class="n">add</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="p">{</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  <span class="p">[</span><span class="s2">&quot;hello:say-hello&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kr">function</span><span class="p">()</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">core</span><span class="p">.</span><span class="n">log</span><span class="p">(</span><span class="s2">&quot;Hello from my plugin!&quot;</span><span class="p">)</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>  <span class="kr">end</span><span class="p">,</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="p">})</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">keymap</span><span class="p">.</span><span class="n">add</span> <span class="p">{</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>  <span class="p">[</span><span class="s2">&quot;ctrl+shift+h&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;hello:say-hello&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="p">}</span>
-</code></pre></div>
-<h3 id="disabling-plugins">Disabling plugins<a class="headerlink" href="#disabling-plugins" title="Permanent link">&para;</a></h3>
-<p>In <code>config.lua</code> or <code>init.lua</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kd">local</span> <span class="n">config</span> <span class="o">=</span> <span class="nb">require</span> <span class="s2">&quot;core.config&quot;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">config</span><span class="p">.</span><span class="n">plugins</span><span class="p">.</span><span class="n">minimap</span> <span class="o">=</span> <span class="kc">false</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">config</span><span class="p">.</span><span class="n">plugins</span><span class="p">.</span><span class="n">drawwhitespace</span> <span class="o">=</span> <span class="kc">false</span>
-</code></pre></div>
-<h3 id="available-apis">Available APIs<a class="headerlink" href="#available-apis" title="Permanent link">&para;</a></h3>
-<p>Plugins can use any module via <code>require</code>:</p>
-<ul>
-<li><code>core</code> -- logging, open_doc, projects, active_view</li>
-<li><code>core.command</code> -- register and perform commands</li>
-<li><code>core.keymap</code> -- bind keys to commands</li>
-<li><code>core.config</code> -- read/write editor settings</li>
-<li><code>core.style</code> -- colors and fonts</li>
-<li><code>core.doc</code> -- document model (lines, selections, edits)</li>
-<li><code>core.docview</code> -- document rendering (override draw methods)</li>
-<li><code>core.view</code> -- base view class for custom views</li>
-<li><code>core.common</code> -- path utilities, drawing helpers</li>
-<li><code>core.syntax</code> -- register custom syntax grammars</li>
-</ul>
-<p>See <a href="https://github.com/danpozmanter/lite-anvil/blob/main/PLUGINS_GUIDE.md">PLUGINS_GUIDE.md</a> for the full API reference.</p>
+<h3 id="themes">Themes<a class="headerlink" href="#themes" title="Permanent link">&para;</a></h3>
+<p>Cycle themes with <code>Ctrl+Shift+P</code> or the command palette. JSON theme files are in <code>data/assets/themes/</code>.</p>
 
 
 

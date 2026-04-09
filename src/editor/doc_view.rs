@@ -104,17 +104,30 @@ impl DocView {
         let line_h = style.code_font_height * 1.2; // line_height multiplier
         let gutter_w = self.gutter_width;
         let text_x = self.rect.x + gutter_w;
-        let _text_w = self.rect.w - gutter_w;
+        let text_w = (self.rect.w - gutter_w).max(0.0);
 
         ctx.set_clip_rect(self.rect.x, self.rect.y, self.rect.w, self.rect.h);
 
+        // `lines[0]` is the first visible row built by `build_render_lines`,
+        // which starts at line `first = floor(scroll_y / line_h) + 1` rather
+        // than line 1. The local index `i` is therefore not the absolute
+        // visual row — it's the offset from `lines[0]`. Compute the y offset
+        // for `lines[0]` from its absolute line number so every subsequent
+        // row sits at its correct absolute position.
+        let first_visual_row = lines
+            .first()
+            .map(|l| l.line_number.saturating_sub(1) as f64 * line_h)
+            .unwrap_or(0.0);
+
+        // Pass 1: gutter-side content drawn under the full clip. Line
+        // highlights span the whole row (gutter + text), then line numbers,
+        // fold markers, and git markers paint inside the gutter.
         for (i, line) in lines.iter().enumerate() {
-            let y = self.rect.y + (i as f64 * line_h) - self.scroll_y;
+            let y = self.rect.y + first_visual_row + (i as f64 * line_h) - self.scroll_y;
             if y + line_h < self.rect.y || y > self.rect.y + self.rect.h {
                 continue;
             }
 
-            // Current line highlight (primary cursor and all extra cursors)
             let on_cursor_line = line.line_number == cursor_line
                 || extra_cursors.iter().any(|(cl, _)| *cl == line.line_number);
             if on_cursor_line {
@@ -156,6 +169,21 @@ impl DocView {
                 };
                 ctx.draw_rect(self.rect.x, y, marker_w, line_h, marker_color);
             }
+        }
+
+        // Switch to a tighter clip for the text area so horizontally-scrolled
+        // content cannot bleed left into the gutter and overlap line numbers.
+        ctx.set_clip_rect(text_x, self.rect.y, text_w, self.rect.h);
+
+        // Pass 2: text-area content. Indent guides, selection highlights,
+        // tokens, whitespace markers, the column-80 guide, and cursors all
+        // use scroll_x and must be clipped to the text area.
+        for (i, line) in lines.iter().enumerate() {
+            let y = self.rect.y + first_visual_row + (i as f64 * line_h) - self.scroll_y;
+            if y + line_h < self.rect.y || y > self.rect.y + self.rect.h {
+                continue;
+            }
+            let text_y = y + (line_h - style.code_font_height) / 2.0;
 
             // Indent guides
             let full_text: String = line.tokens.iter().map(|t| t.text.as_str()).collect();
@@ -246,11 +274,11 @@ impl DocView {
             }
         }
 
-        // Line guide at column 80
+        // Line guide at column 80 (also clipped to the text area).
         {
             let space_w = ctx.font_width(style.code_font, "n");
             let guide_x = text_x + style.padding_x - self.scroll_x + space_w * 80.0;
-            if guide_x >= self.rect.x && guide_x <= self.rect.x + self.rect.w {
+            if guide_x >= text_x && guide_x <= self.rect.x + self.rect.w {
                 let guide_color = style.guide_color();
                 ctx.draw_rect(guide_x, self.rect.y, 2.0, self.rect.h, guide_color);
             }
@@ -267,7 +295,7 @@ impl DocView {
             for &(cl, cc) in &all_cursors {
                 for line in lines {
                     if line.line_number == cl {
-                        let y = self.rect.y
+                        let y = self.rect.y + first_visual_row
                             + ((cl - lines[0].line_number) as f64 * line_h)
                             - self.scroll_y;
                         let full_text: String =
@@ -288,6 +316,10 @@ impl DocView {
                 }
             }
         }
+
+        // Restore full clip so the scrollbars (which sit at the right and
+        // bottom edges, partly outside the text area) render correctly.
+        ctx.set_clip_rect(self.rect.x, self.rect.y, self.rect.w, self.rect.h);
 
         // Vertical scrollbar
         if !lines.is_empty() {

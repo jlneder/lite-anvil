@@ -574,6 +574,8 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     let mut cmdview_active = false;
     let mut cmdview_mode = CmdViewMode::OpenFile;
     let mut cmdview_text = String::new();
+    // Byte position of the input caret within cmdview_text. Always lands on a UTF-8 boundary.
+    let mut cmdview_cursor: usize = 0;
     let mut cmdview_suggestions: Vec<String> = Vec::new();
     let mut cmdview_selected: usize = 0;
     let mut cmdview_label = String::new();
@@ -969,6 +971,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     cmdview_active = true;
                     cmdview_mode = CmdViewMode::OpenRecent;
                     cmdview_text.clear();
+                    cmdview_cursor = 0;
                     cmdview_label = "Open Recent:".to_string();
                     let mut combined: Vec<String> = Vec::new();
                     for p in &recent_files {
@@ -987,7 +990,13 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                 "core:open-project-folder" => {
                     cmdview_active = true;
                     cmdview_mode = CmdViewMode::OpenFolder;
-                    cmdview_text = format!("{project_root}/");
+                    // Always start from the absolute project root so backspace
+                    // navigation can walk up directories cleanly.
+                    let abs_root = std::path::absolute(&project_root)
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| project_root.clone());
+                    cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
+                    cmdview_cursor = cmdview_text.len();
                     cmdview_label = "Open Folder:".to_string();
                     cmdview_suggestions = path_suggest(&cmdview_text, &project_root, true);
                     cmdview_selected = 0;
@@ -995,15 +1004,19 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                 "core:open-file" | "core:open-file-from-project" => {
                     cmdview_active = true;
                     cmdview_mode = CmdViewMode::OpenFile;
+                    let abs_root = std::path::absolute(&project_root)
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| project_root.clone());
                     if let Some(doc) = docs.get(active_tab) {
                         if let Some(pos) = doc.path.rfind('/') {
                             cmdview_text = format!("{}/", &doc.path[..pos]);
                         } else {
-                            cmdview_text = format!("{project_root}/");
+                            cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
                         }
                     } else {
-                        cmdview_text = format!("{project_root}/");
+                        cmdview_text = format!("{}/", abs_root.trim_end_matches('/'));
                     }
+                    cmdview_cursor = cmdview_text.len();
                     cmdview_label = "Open File:".to_string();
                     cmdview_suggestions = path_suggest(&cmdview_text, &project_root, false);
                     cmdview_selected = 0;
@@ -1065,6 +1078,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     cmdview_active = true;
                     cmdview_mode = CmdViewMode::OpenFile; // reuse mode, Enter parses as line number
                     cmdview_text.clear();
+                    cmdview_cursor = 0;
                     cmdview_label = "Go To Line:".to_string();
                     cmdview_suggestions.clear();
                     cmdview_selected = 0;
@@ -1371,17 +1385,53 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     redraw = true;
                 }
                 EditorEvent::KeyReleased { key, .. } => {
-                    if key == "left shift" || key == "right shift" {
+                    let k = key.as_str();
+                    if k == "left shift" || k == "right shift"
+                        || k == "lshift" || k == "rshift"
+                    {
                         shift_held = false;
                     }
                     continue;
                 }
                 EditorEvent::KeyPressed { key, modifiers } => {
+                    // Snap any in-flight smooth-scroll animation to its target.
+                    // The lerp is event-driven (it only ticks on redraws), so
+                    // pressing keys after a wheel scroll would otherwise resume
+                    // the paused animation one tick at a time per press.
+                    // Pressing any key signals "I'm done scrolling", so finalize
+                    // the position immediately.
+                    if let Some(doc) = docs.get_mut(active_tab) {
+                        doc.view.scroll_y = doc.view.target_scroll_y;
+                    }
+                    // Modifier-only key presses (Ctrl/Shift/Alt/Gui alone) shouldn't
+                    // touch the editor at all — no redraw, no blink reset, no scroll
+                    // lerp tick. Only update the local shift tracker for shift+click.
+                    // SDL reports modifier keys with platform-dependent names
+                    // ("left ctrl" / "left control" / "lctrl"; "left gui" /
+                    // "left meta" / "left super"), so match the family rather
+                    // than a fixed string list.
+                    let key_lc = key.as_str();
+                    let is_modifier_only = matches!(
+                        key_lc,
+                        "left shift" | "right shift" | "lshift" | "rshift"
+                            | "left ctrl" | "right ctrl" | "lctrl" | "rctrl"
+                            | "left control" | "right control"
+                            | "left alt" | "right alt" | "lalt" | "ralt"
+                            | "left gui" | "right gui" | "lgui" | "rgui"
+                            | "left meta" | "right meta" | "lmeta" | "rmeta"
+                            | "left super" | "right super" | "lsuper" | "rsuper"
+                            | "left win" | "right win"
+                    );
+                    if is_modifier_only {
+                        if key_lc == "left shift" || key_lc == "right shift"
+                            || key_lc == "lshift" || key_lc == "rshift"
+                        {
+                            shift_held = true;
+                        }
+                        continue;
+                    }
                     cursor_blink_reset = Instant::now();
                     let mods = *modifiers;
-                    if key == "left shift" || key == "right shift" {
-                        shift_held = true;
-                    }
 
                     // Context menu intercepts keys when visible.
                     if context_menu.visible {
@@ -1533,6 +1583,53 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             normalize_path(&joined)
                         }
 
+                        /// Byte index of the previous character before `cursor` in `text`.
+                        fn cmdview_prev_char(text: &str, cursor: usize) -> usize {
+                            text[..cursor]
+                                .char_indices()
+                                .next_back()
+                                .map(|(i, _)| i)
+                                .unwrap_or(0)
+                        }
+                        /// Byte index of the next character at or after `cursor` in `text`.
+                        fn cmdview_next_char(text: &str, cursor: usize) -> usize {
+                            if cursor >= text.len() {
+                                return text.len();
+                            }
+                            text[cursor..]
+                                .char_indices()
+                                .nth(1)
+                                .map(|(i, _)| cursor + i)
+                                .unwrap_or(text.len())
+                        }
+                        /// Jump left to the start of the previous path segment.
+                        fn cmdview_word_left(text: &str, cursor: usize) -> usize {
+                            if cursor == 0 {
+                                return 0;
+                            }
+                            let s = &text[..cursor];
+                            // Skip a trailing slash so successive ctrl+left walks segments.
+                            let stripped = s.trim_end_matches('/');
+                            if let Some(idx) = stripped.rfind('/') {
+                                idx + 1
+                            } else {
+                                0
+                            }
+                        }
+                        /// Jump right to the start of the next path segment.
+                        fn cmdview_word_right(text: &str, cursor: usize) -> usize {
+                            if cursor >= text.len() {
+                                return text.len();
+                            }
+                            let rest = &text[cursor..];
+                            // Skip the slash directly under the cursor, then find the next.
+                            let skip = if rest.starts_with('/') { 1 } else { 0 };
+                            match rest[skip..].find('/') {
+                                Some(idx) => cursor + skip + idx + 1,
+                                None => text.len(),
+                            }
+                        }
+
                         match key.as_str() {
                             "escape" => {
                                 cmdview_active = false;
@@ -1579,6 +1676,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                         } else if p.is_dir() {
                                             // Navigate into directory.
                                             cmdview_text = format!("{path}/");
+                                            cmdview_cursor = cmdview_text.len();
                                             cmdview_suggestions = path_suggest(&cmdview_text, &project_root, false);
                                             cmdview_selected = 0;
                                         }
@@ -1641,6 +1739,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                 // Select current suggestion: replace text, refresh.
                                 if !cmdview_suggestions.is_empty() && cmdview_selected < cmdview_suggestions.len() {
                                     cmdview_text = cmdview_suggestions[cmdview_selected].clone();
+                                    cmdview_cursor = cmdview_text.len();
                                     let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
                                     cmdview_suggestions = path_suggest(&cmdview_text, &project_root, dirs_only);
                                     cmdview_selected = 0;
@@ -1658,18 +1757,45 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                     cmdview_selected = (cmdview_selected + 1) % cmdview_suggestions.len();
                                 }
                             }
+                            "left" => {
+                                if mods.ctrl {
+                                    cmdview_cursor = cmdview_word_left(&cmdview_text, cmdview_cursor);
+                                } else {
+                                    cmdview_cursor = cmdview_prev_char(&cmdview_text, cmdview_cursor);
+                                }
+                            }
+                            "right" => {
+                                if mods.ctrl {
+                                    cmdview_cursor = cmdview_word_right(&cmdview_text, cmdview_cursor);
+                                } else {
+                                    cmdview_cursor = cmdview_next_char(&cmdview_text, cmdview_cursor);
+                                }
+                            }
+                            "home" => {
+                                cmdview_cursor = 0;
+                            }
+                            "end" => {
+                                cmdview_cursor = cmdview_text.len();
+                            }
+                            "delete" => {
+                                if cmdview_cursor < cmdview_text.len() {
+                                    let next = cmdview_next_char(&cmdview_text, cmdview_cursor);
+                                    cmdview_text.replace_range(cmdview_cursor..next, "");
+                                    let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
+                                    cmdview_suggestions = path_suggest(&cmdview_text, &project_root, dirs_only);
+                                    cmdview_selected = 0;
+                                }
+                            }
                             "backspace" => {
                                 if mods.ctrl {
-                                    if cmdview_text.ends_with('/') {
-                                        cmdview_text.pop();
-                                    }
-                                    if let Some(pos) = cmdview_text.rfind('/') {
-                                        cmdview_text.truncate(pos + 1);
-                                    } else {
-                                        cmdview_text.clear();
-                                    }
-                                } else {
-                                    cmdview_text.pop();
+                                    // Delete the previous path segment up to the cursor.
+                                    let segment_start = cmdview_word_left(&cmdview_text, cmdview_cursor);
+                                    cmdview_text.replace_range(segment_start..cmdview_cursor, "");
+                                    cmdview_cursor = segment_start;
+                                } else if cmdview_cursor > 0 {
+                                    let prev = cmdview_prev_char(&cmdview_text, cmdview_cursor);
+                                    cmdview_text.replace_range(prev..cmdview_cursor, "");
+                                    cmdview_cursor = prev;
                                 }
                                 let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
                                 cmdview_suggestions = path_suggest(&cmdview_text, &project_root, dirs_only);
@@ -2151,7 +2277,10 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     }
                     if cmdview_active {
                         let prev_text = cmdview_text.clone();
-                        cmdview_text.push_str(text);
+                        // Insert at the caret rather than appending so left/right/home/end
+                        // editing is preserved while typing.
+                        cmdview_text.insert_str(cmdview_cursor, text);
+                        cmdview_cursor += text.len();
                         let dirs_only = cmdview_mode == CmdViewMode::OpenFolder;
                         if cmdview_text.is_empty() {
                             cmdview_suggestions = if dirs_only { recent_projects.clone() } else { recent_files.clone() };
@@ -2159,15 +2288,18 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             cmdview_suggestions = path_suggest(&cmdview_text, &project_root, dirs_only);
                         }
                         cmdview_selected = 0;
-                        // Typeahead: auto-fill when exactly 1 suggestion, user is
-                        // typing (not deleting), and text doesn't end with '/'.
+                        // Typeahead: only auto-fill when the caret is at the end of the
+                        // input (otherwise editing in the middle would scramble it),
+                        // exactly one suggestion, user is typing, no trailing slash.
                         if cmdview_suggestions.len() == 1
+                            && cmdview_cursor == cmdview_text.len()
                             && cmdview_text.len() > prev_text.len()
                             && !cmdview_text.ends_with('/')
                         {
                             let suggestion = &cmdview_suggestions[0];
                             if suggestion.starts_with(&cmdview_text) {
                                 cmdview_text = suggestion.clone();
+                                cmdview_cursor = cmdview_text.len();
                             }
                         }
                         redraw = true;
@@ -2569,57 +2701,8 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                                 bx += iw + icon_spacing;
                             }
                             if let Some(cmd) = clicked_cmd {
-                                match cmd {
-                                    "core:new-doc" => {
-                                        let buf_id = buffer::insert_buffer(buffer::default_buffer_state());
-                                        let mut dv = DocView::new();
-                                        dv.buffer_id = Some(buf_id);
-                                        docs.push(OpenDoc { view: dv, path: String::new(), name: "[new]".to_string(), saved_change_id: 1, saved_signature: buffer::content_signature(&["\n".to_string()]), indent_type: "soft".to_string(), indent_size: 2, git_changes: std::collections::HashMap::new() });
-                                        active_tab = docs.len() - 1;
-                                    }
-                                    "core:open-file" => {
-                                        cmdview_active = true;
-                                        cmdview_mode = CmdViewMode::OpenFile;
-                                        cmdview_text = format!("{project_root}/");
-                                        cmdview_label = "Open File:".to_string();
-                                        cmdview_suggestions = path_suggest(&cmdview_text, &project_root, false);
-                                        cmdview_selected = 0;
-                                    }
-                                    "doc:save" => {
-                                        if let Some(doc) = docs.get_mut(active_tab) {
-                                            if let Some(buf_id) = doc.view.buffer_id {
-                                                let path = doc.path.clone();
-                                                if !path.is_empty() {
-                                                    let _ = buffer::with_buffer(buf_id, |b| {
-                                                        buffer::save_file(b, &path, b.crlf)
-                                                            .map_err(|_| buffer::BufferError::UnknownBuffer)
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                    "find-replace:find" => {
-                                        find_active = true;
-                                        replace_active = false;
-                                        find_focus_on_replace = false;
-                                    }
-                                    "core:find-command" => {
-                                        palette_active = true;
-                                        palette_query.clear();
-                                        palette_results = all_commands.clone();
-                                        palette_selected = 0;
-                                    }
-                                    "core:open-user-settings" => {
-                                        let settings_path = format!("{userdir}/config.toml");
-                                        if !std::path::Path::new(&settings_path).exists() {
-                                            let _ = std::fs::write(&settings_path, NativeConfig::default_toml_template());
-                                        }
-                                        if open_file_into(&settings_path, &mut docs) {
-                                            active_tab = docs.len() - 1;
-                                        }
-                                    }
-                                    _ => {}
-                                }
+                                let cmd = cmd.to_string();
+                                dispatch_command!(cmd);
                             }
                             redraw = true;
                             continue;
@@ -3611,16 +3694,34 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     }
                 }
 
-                // Smooth scroll interpolation.
+                // Smooth scroll interpolation. Snap target and current to integer
+                // pixels so the lerp can never have a sub-pixel residual that
+                // would cause repeated tiny snaps on every redraw — which the
+                // user perceives as scroll drifting when they only move the
+                // mouse or tap a modifier.
+                #[allow(unused_assignments)]
                 if let Some(doc) = docs.get_mut(active_tab) {
                     let dv = &mut doc.view;
-                    let diff = dv.target_scroll_y - dv.scroll_y;
-                    #[allow(unused_assignments)]
-                    if diff.abs() > 0.5 {
-                        dv.scroll_y += diff * 0.35;
-                        redraw = true;
-                    } else if diff.abs() > 0.01 {
-                        dv.scroll_y = dv.target_scroll_y;
+                    let target = dv.target_scroll_y.round();
+                    dv.target_scroll_y = target;
+                    let current = dv.scroll_y;
+                    let diff = target - current;
+                    if diff.abs() >= 1.0 {
+                        // Lerp toward target, then snap to integer pixels.
+                        let new_scroll = (current + diff * 0.35).round();
+                        if new_scroll != current {
+                            dv.scroll_y = new_scroll;
+                            redraw = true;
+                        } else if current != target {
+                            // The lerp step rounded to the same pixel; finish
+                            // the convergence in one final hop.
+                            dv.scroll_y = target;
+                            redraw = true;
+                        }
+                    } else if current != target {
+                        // Within one pixel: finalize at the exact target so
+                        // subsequent frames see diff == 0 and do nothing.
+                        dv.scroll_y = target;
                     }
                 }
 
@@ -3768,7 +3869,24 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_else(|_| project_root.clone());
                     let dir_name = resolved_root.rsplit('/').find(|s| !s.is_empty()).unwrap_or(&resolved_root);
-                    let dir_label = dir_name.to_string();
+                    // Ellipsize if the folder name overflows the sidebar width.
+                    let header_avail = (sidebar_w - style.padding_x * 2.0 - style.divider_size).max(0.0);
+                    let dir_label: String = if draw_ctx.font_width(style.font, dir_name) <= header_avail {
+                        dir_name.to_string()
+                    } else {
+                        let ell = "...";
+                        let ell_w = draw_ctx.font_width(style.font, ell);
+                        let chars: Vec<char> = dir_name.chars().collect();
+                        let mut fit = String::new();
+                        for take in (0..chars.len()).rev() {
+                            let candidate: String = chars[..take].iter().collect();
+                            if draw_ctx.font_width(style.font, &candidate) + ell_w <= header_avail {
+                                fit = format!("{candidate}{ell}");
+                                break;
+                            }
+                        }
+                        if fit.is_empty() { ell.to_string() } else { fit }
+                    };
                     draw_ctx.draw_rect(0.0, toolbar_h, sidebar_w, dir_header_h, style.background2.to_array());
                     draw_ctx.draw_text(style.font, &dir_label, style.padding_x, toolbar_h + (dir_header_h - style.font_height) / 2.0, style.accent.to_array());
                     draw_ctx.draw_rect(0.0, toolbar_h + dir_header_h - style.divider_size, sidebar_w, style.divider_size, style.divider.to_array());
@@ -3815,7 +3933,25 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             } else {
                                 style.text.to_array()
                             };
-                            draw_ctx.draw_text(style.font, &entry.name, name_x, text_y, name_color);
+                            // Ellipsize if the name would overflow the sidebar width.
+                            let avail = (sidebar_w - name_x - style.padding_x - style.divider_size).max(0.0);
+                            let display_name: String = if draw_ctx.font_width(style.font, &entry.name) <= avail {
+                                entry.name.clone()
+                            } else {
+                                let ell = "...";
+                                let ell_w = draw_ctx.font_width(style.font, ell);
+                                let chars: Vec<char> = entry.name.chars().collect();
+                                let mut fit = String::new();
+                                for take in (0..chars.len()).rev() {
+                                    let candidate: String = chars[..take].iter().collect();
+                                    if draw_ctx.font_width(style.font, &candidate) + ell_w <= avail {
+                                        fit = format!("{candidate}{ell}");
+                                        break;
+                                    }
+                                }
+                                if fit.is_empty() { ell.to_string() } else { fit }
+                            };
+                            draw_ctx.draw_text(style.font, &display_name, name_x, text_y, name_color);
                         }
                         ey += entry_h;
                     }
@@ -4593,7 +4729,20 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     let label = &cmdview_label;
                     let label_w = draw_ctx.font_width(style.font, label);
                     draw_ctx.draw_text(style.font, label, cv_x + style.padding_x, input_y, style.accent.to_array());
-                    draw_ctx.draw_text(style.font, &format!("{}_", &cmdview_text), cv_x + style.padding_x + label_w + style.padding_x, input_y, style.text.to_array());
+                    // Render text with the caret '_' positioned at cmdview_cursor.
+                    let cursor_safe = cmdview_cursor.min(cmdview_text.len());
+                    let display = format!(
+                        "{}_{}",
+                        &cmdview_text[..cursor_safe],
+                        &cmdview_text[cursor_safe..],
+                    );
+                    draw_ctx.draw_text(
+                        style.font,
+                        &display,
+                        cv_x + style.padding_x + label_w + style.padding_x,
+                        input_y,
+                        style.text.to_array(),
+                    );
 
                     // Divider below input.
                     draw_ctx.draw_rect(cv_x, input_y + line_h, cv_w, style.divider_size, style.divider.to_array());
@@ -5519,9 +5668,16 @@ fn handle_doc_command(
         Ok(())
     });
 
-    // Auto-scroll to keep cursor visible.
+    // Auto-scroll to keep cursor visible — only when the cursor's LINE
+    // actually changed. Commands like doc:select-none, doc:save, etc. pass
+    // through the wildcard arm and run handle_doc_command without moving
+    // the cursor; running auto-scroll for those snaps the view back to the
+    // cursor and effectively cancels any scrolling the user did.
     let _ = buffer::with_buffer(buf_id, |b| {
         let cursor_line = *b.selections.get(2).unwrap_or(&1);
+        if cursor_line == prev_cursor_line {
+            return Ok(());
+        }
         let cursor_y = (cursor_line as f64 - 1.0) * line_h;
         let view_h = dv.rect().h;
         if cursor_y < dv.scroll_y {
