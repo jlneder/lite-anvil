@@ -1,5 +1,13 @@
 # Change Log
 
+## [2.5.0] - 2026-04-10 — Replace in files, find/replace shortcut overhaul.
+
+* Replace in files (`Alt+Shift+F`): project-wide find-and-replace with live preview. Search input, replace input, Tab to switch fields, Enter to preview matches, Ctrl+Enter to execute replace across all matching files. Open buffers are reloaded after replacement.
+* Replace in file shortcut changed from `Ctrl+H` to `Alt+F` (avoids Cmd+H conflict on macOS).
+* Removed duplicate `Ctrl+R` binding for replace.
+* Find in files (`Ctrl+Shift+F`) no longer conflicts with focus mode (focus mode moved to palette only).
+* Both Find in Files and Replace in Files now have clear "FIND IN FILES" / "REPLACE IN FILES" title bars, match counts, and the same toggle options as single-file find: `Alt+R` regex, `Alt+W` whole word, `Alt+I` case-insensitive. Grep flags (`-F`, `-w`, `-i`) update live as toggles change.
+
 ## [2.4.3] - 2026-04-10 — Scroll discipline.
 
 * Scrolling now only occurs from: mouse wheel, scrollbar, keyboard navigation (arrows, Home/End, PageUp/Down, Ctrl+arrows).

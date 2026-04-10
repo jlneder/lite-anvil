@@ -53,7 +53,7 @@ description: Keyboard shortcuts, LSP language server setup, configuration, and s
 | Key | Action |
 |-----|--------|
 | `Ctrl+F` | Find in file |
-| `Ctrl+H` / `Ctrl+R` | Replace in file |
+| `Alt+F` | Replace in file |
 | `F3` / `Enter` | Next match |
 | `Shift+F3` / `Shift+Enter` | Previous match |
 | `Alt+R` | Toggle regex (inside find bar) |
@@ -61,7 +61,8 @@ description: Keyboard shortcuts, LSP language server setup, configuration, and s
 | `Alt+I` | Toggle case-insensitive (inside find bar) |
 | `Alt+S` | Toggle find-in-selection (inside find bar) |
 | `Ctrl+Enter` | Replace current match and find next |
-| `Ctrl+Shift+F` | Project-wide search |
+| `Ctrl+Shift+F` | Find in files (project search) |
+| `Alt+Shift+F` | Replace in files (project replace) |
 
 ### LSP
 

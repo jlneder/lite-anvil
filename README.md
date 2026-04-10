@@ -46,9 +46,10 @@ I do not intend to maintain or support this in any way, but wanted to share the 
 | `Ctrl+O` | Open file (autocomplete navigator) |
 | `Ctrl+Shift+O` | Open project folder |
 | `Ctrl+Shift+R` | Open recent file or folder |
-| `Ctrl+Shift+F` | Project-wide search |
+| `Ctrl+Shift+F` | Find in files |
+| `Alt+Shift+F` | Replace in files |
 | `Ctrl+F` | Find in file |
-| `Ctrl+H` | Replace in file |
+| `Alt+F` | Replace in file |
 | `F3` / `Shift+F3` | Next / previous match |
 | `Ctrl+/` | Toggle line comment |
 | `Ctrl+Up` / `Ctrl+Down` | Move line up / down |

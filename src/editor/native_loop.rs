@@ -940,22 +940,53 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
     let mut project_search_query = String::new();
     let mut project_search_results: Vec<(String, usize, String)> = Vec::new();
     let mut project_search_selected: usize = 0;
+    // Shared toggles for both project search and project replace.
+    let mut project_use_regex = false;
+    let mut project_whole_word = false;
+    let mut project_case_insensitive = true;
+
+    // Project-wide replace state.
+    let mut project_replace_active = false;
+    let mut project_replace_search = String::new();
+    let mut project_replace_with = String::new();
+    let mut project_replace_focus_on_replace = false;
+    let mut project_replace_results: Vec<(String, usize, String)> = Vec::new();
+    let mut project_replace_selected: usize = 0;
 
     /// Run grep across the project, returning (path, line_number, line_text) tuples.
-    fn run_project_search(query: &str, root: &str) -> Vec<(String, usize, String)> {
+    fn run_project_search(
+        query: &str,
+        root: &str,
+        use_regex: bool,
+        whole_word: bool,
+        case_insensitive: bool,
+    ) -> Vec<(String, usize, String)> {
         if query.len() < 2 {
             return Vec::new();
         }
+        let mut args = vec!["-rn".to_string()];
+        if case_insensitive {
+            args.push("-i".to_string());
+        }
+        if !use_regex {
+            args.push("-F".to_string()); // fixed string (literal)
+        }
+        if whole_word {
+            args.push("-w".to_string());
+        }
+        for pat in &[
+            "--include=*.rs", "--include=*.toml", "--include=*.json",
+            "--include=*.md", "--include=*.txt", "--include=*.js",
+            "--include=*.ts", "--include=*.py", "--include=*.go",
+            "--include=*.c", "--include=*.h", "--include=*.cpp",
+            "--include=*.java",
+        ] {
+            args.push(pat.to_string());
+        }
+        args.push(query.to_string());
+        args.push(root.to_string());
         let output = std::process::Command::new("grep")
-            .args([
-                "-rn", "-i",
-                "--include=*.rs", "--include=*.toml", "--include=*.json",
-                "--include=*.md", "--include=*.txt", "--include=*.js",
-                "--include=*.ts", "--include=*.py", "--include=*.go",
-                "--include=*.c", "--include=*.h", "--include=*.cpp",
-                "--include=*.java",
-                query, root,
-            ])
+            .args(&args)
             .output();
         let Ok(out) = output else {
             return Vec::new();
@@ -972,6 +1003,61 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
             results.push((path.to_string(), line_num, text.trim().to_string()));
         }
         results
+    }
+
+    /// Execute project-wide find-and-replace using sed. Returns the number of
+    /// files modified.
+    fn execute_project_replace(root: &str, search: &str, replace: &str) -> usize {
+        if search.is_empty() {
+            return 0;
+        }
+        // Find matching files first.
+        let grep_out = std::process::Command::new("grep")
+            .args(["-rl", "-i",
+                "--include=*.rs", "--include=*.toml", "--include=*.json",
+                "--include=*.md", "--include=*.txt", "--include=*.js",
+                "--include=*.ts", "--include=*.py", "--include=*.go",
+                "--include=*.c", "--include=*.h", "--include=*.cpp",
+                "--include=*.java",
+                search, root,
+            ])
+            .output();
+        let Ok(out) = grep_out else { return 0 };
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let files: Vec<&str> = stdout.lines().collect();
+        if files.is_empty() {
+            return 0;
+        }
+        // Escape sed special characters in search and replace.
+        let sed_escape = |s: &str| -> String {
+            s.replace('\\', "\\\\")
+                .replace('/', "\\/")
+                .replace('&', "\\&")
+                .replace('\n', "\\n")
+        };
+        let sed_search = sed_escape(search);
+        let sed_replace = sed_escape(replace);
+        let sed_expr = format!("s/{sed_search}/{sed_replace}/gi");
+        let mut count = 0usize;
+        for file in &files {
+            let file = file.trim();
+            if file.is_empty() { continue; }
+            let ok = if cfg!(target_os = "macos") {
+                std::process::Command::new("sed")
+                    .args(["-i", "", "-e", &sed_expr, file])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            } else {
+                std::process::Command::new("sed")
+                    .args(["-i", "-e", &sed_expr, file])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
+            if ok { count += 1; }
+        }
+        count
     }
 
     /// List filesystem entries matching a typed path prefix.
@@ -1324,6 +1410,14 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         format!("Lite-Anvil v{}", env!("CARGO_PKG_VERSION")),
                         Instant::now(),
                     ));
+                }
+                "core:project-replace" => {
+                    project_replace_active = true;
+                    project_replace_search.clear();
+                    project_replace_with.clear();
+                    project_replace_focus_on_replace = false;
+                    project_replace_results.clear();
+                    project_replace_selected = 0;
                 }
                 "core:project-search" => {
                     project_search_active = true;
@@ -2311,6 +2405,23 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
 
                     // Project search intercepts keys when active.
                     if project_search_active {
+                        if mods.alt && !mods.ctrl {
+                            let toggled = match key.as_str() {
+                                "r" => { project_use_regex = !project_use_regex; true }
+                                "w" => { project_whole_word = !project_whole_word; true }
+                                "i" => { project_case_insensitive = !project_case_insensitive; true }
+                                _ => false,
+                            };
+                            if toggled {
+                                project_search_results = run_project_search(
+                                    &project_search_query, &project_root,
+                                    project_use_regex, project_whole_word, project_case_insensitive,
+                                );
+                                project_search_selected = 0;
+                                redraw = true;
+                                continue;
+                            }
+                        }
                         match key.as_str() {
                             "escape" => {
                                 project_search_active = false;
@@ -2360,8 +2471,97 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             "backspace" => {
                                 project_search_query.pop();
                                 project_search_results =
-                                    run_project_search(&project_search_query, &project_root);
+                                    run_project_search(&project_search_query, &project_root, project_use_regex, project_whole_word, project_case_insensitive);
                                 project_search_selected = 0;
+                            }
+                            _ => {}
+                        }
+                        redraw = true;
+                        continue;
+                    }
+
+                    // Project replace intercepts keys when active.
+                    if project_replace_active {
+                        if mods.alt && !mods.ctrl {
+                            let toggled = match key.as_str() {
+                                "r" => { project_use_regex = !project_use_regex; true }
+                                "w" => { project_whole_word = !project_whole_word; true }
+                                "i" => { project_case_insensitive = !project_case_insensitive; true }
+                                _ => false,
+                            };
+                            if toggled {
+                                project_replace_results = run_project_search(
+                                    &project_replace_search, &project_root,
+                                    project_use_regex, project_whole_word, project_case_insensitive,
+                                );
+                                project_replace_selected = 0;
+                                redraw = true;
+                                continue;
+                            }
+                        }
+                        match key.as_str() {
+                            "escape" => {
+                                project_replace_active = false;
+                            }
+                            "tab" => {
+                                project_replace_focus_on_replace = !project_replace_focus_on_replace;
+                            }
+                            "return" | "keypad enter" if mods.ctrl => {
+                                // Execute replace all.
+                                if !project_replace_search.is_empty() {
+                                    let count = execute_project_replace(
+                                        &project_root,
+                                        &project_replace_search,
+                                        &project_replace_with,
+                                    );
+                                    project_replace_active = false;
+                                    info_message = Some((
+                                        format!("Replaced {count} occurrences across project"),
+                                        Instant::now(),
+                                    ));
+                                    // Reload any open files that may have changed.
+                                    for doc in &mut docs {
+                                        if let Some(buf_id) = doc.view.buffer_id {
+                                            if !doc.path.is_empty() {
+                                                let _ = buffer::with_buffer_mut(buf_id, |b| {
+                                                    let mut fresh = buffer::default_buffer_state();
+                                                    if buffer::load_file(&mut fresh, &doc.path).is_ok() {
+                                                        b.lines = fresh.lines;
+                                                        b.change_id += 1;
+                                                    }
+                                                    Ok(())
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            "return" | "keypad enter" => {
+                                // Preview: run search to show matches.
+                                if !project_replace_search.is_empty() {
+                                    project_replace_results =
+                                        run_project_search(&project_replace_search, &project_root, project_use_regex, project_whole_word, project_case_insensitive);
+                                    project_replace_selected = 0;
+                                }
+                            }
+                            "up" => {
+                                project_replace_selected = project_replace_selected.saturating_sub(1);
+                            }
+                            "down" => {
+                                if !project_replace_results.is_empty() {
+                                    project_replace_selected = (project_replace_selected + 1)
+                                        .min(project_replace_results.len() - 1);
+                                }
+                            }
+                            "backspace" => {
+                                if project_replace_focus_on_replace {
+                                    project_replace_with.pop();
+                                } else {
+                                    project_replace_search.pop();
+                                    project_replace_results =
+                                        run_project_search(&project_replace_search, &project_root, project_use_regex, project_whole_word, project_case_insensitive);
+                                    project_replace_selected = 0;
+                                }
                             }
                             _ => {}
                         }
@@ -2936,8 +3136,20 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     if project_search_active {
                         project_search_query.push_str(text);
                         project_search_results =
-                            run_project_search(&project_search_query, &project_root);
+                            run_project_search(&project_search_query, &project_root, project_use_regex, project_whole_word, project_case_insensitive);
                         project_search_selected = 0;
+                        redraw = true;
+                        continue;
+                    }
+                    if project_replace_active {
+                        if project_replace_focus_on_replace {
+                            project_replace_with.push_str(text);
+                        } else {
+                            project_replace_search.push_str(text);
+                            project_replace_results =
+                                run_project_search(&project_replace_search, &project_root, project_use_regex, project_whole_word, project_case_insensitive);
+                            project_replace_selected = 0;
+                        }
                         redraw = true;
                         continue;
                     }
@@ -5389,26 +5601,26 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     let line_h = style.font_height + style.padding_y;
                     let max_visible = 15usize;
                     let visible_count = project_search_results.len().min(max_visible);
-                    let ps_h = line_h * (visible_count as f64 + 1.0) + style.padding_y * 2.0;
+                    // Title + input + hint + results.
+                    let ps_h = line_h * (visible_count as f64 + 3.0) + style.padding_y * 2.0;
                     let ps_y = style.padding_y * 2.0;
 
-                    // Border + background.
-                    draw_ctx.draw_rect(
-                        ps_x - 1.0, ps_y - 1.0,
-                        ps_w + 2.0, ps_h + 2.0,
-                        style.divider.to_array(),
-                    );
+                    draw_ctx.draw_rect(ps_x - 1.0, ps_y - 1.0, ps_w + 2.0, ps_h + 2.0, style.divider.to_array());
                     draw_ctx.draw_rect(ps_x, ps_y, ps_w, ps_h, style.background3.to_array());
 
+                    // Title bar.
+                    let title_y = ps_y + style.padding_y;
+                    draw_ctx.draw_text(style.font, "Find in Files", ps_x + style.padding_x, title_y, style.accent.to_array());
+                    let match_count = format!("  ({} matches)", project_search_results.len());
+                    let title_w = draw_ctx.font_width(style.font, "Find in Files");
+                    draw_ctx.draw_text(style.font, &match_count, ps_x + style.padding_x + title_w, title_y, style.dim.to_array());
+                    draw_ctx.draw_rect(ps_x, title_y + line_h, ps_w, style.divider_size, style.divider.to_array());
+
                     // Input line.
-                    let input_y = ps_y + style.padding_y;
+                    let input_y = title_y + line_h;
                     let label = "Search: ";
                     let label_w = draw_ctx.font_width(style.font, label);
-                    draw_ctx.draw_text(
-                        style.font, label,
-                        ps_x + style.padding_x, input_y,
-                        style.accent.to_array(),
-                    );
+                    draw_ctx.draw_text(style.font, label, ps_x + style.padding_x, input_y, style.accent.to_array());
                     draw_ctx.draw_text(
                         style.font,
                         &format!("{}_", &project_search_query),
@@ -5416,11 +5628,19 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         style.text.to_array(),
                     );
 
-                    // Divider below input.
-                    draw_ctx.draw_rect(
-                        ps_x, input_y + line_h, ps_w, style.divider_size,
-                        style.divider.to_array(),
+                    // Toggle hints.
+                    let hint_y = input_y + line_h;
+                    draw_ctx.draw_rect(ps_x, hint_y, ps_w, style.divider_size, style.divider.to_array());
+                    let mark = |on: bool| if on { "[x]" } else { "[ ]" };
+                    let hint = format!(
+                        "Alt+R Regex {}  Alt+W Word {}  Alt+I Case {}   Enter open  Esc close",
+                        mark(project_use_regex), mark(project_whole_word), mark(project_case_insensitive),
                     );
+                    draw_ctx.draw_text(style.font, &hint, ps_x + style.padding_x, hint_y + style.padding_y * 0.5, style.dim.to_array());
+
+                    // Divider below hints.
+                    let results_start_y = hint_y + line_h;
+                    draw_ctx.draw_rect(ps_x, results_start_y, ps_w, style.divider_size, style.divider.to_array());
 
                     // Scroll offset so selected item is visible.
                     let scroll_off = if project_search_selected >= max_visible {
@@ -5437,7 +5657,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                         .take(max_visible)
                     {
                         let display_idx = i - scroll_off;
-                        let ry = input_y + line_h + style.divider_size
+                        let ry = results_start_y + style.divider_size
                             + display_idx as f64 * line_h;
                         if i == project_search_selected {
                             draw_ctx.draw_rect(
@@ -5475,6 +5695,92 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             ry + style.padding_y / 2.0,
                             text_color,
                         );
+                    }
+                }
+
+                // Draw project replace overlay.
+                if project_replace_active {
+                    crate::editor::app_state::clip_init(width, height);
+                    use crate::editor::view::DrawContext as _;
+                    let pr_w = (width * 0.6).max(500.0).min(width - 20.0);
+                    let pr_x = (width - pr_w) / 2.0;
+                    let line_h = style.font_height + style.padding_y;
+                    let max_visible = 12usize;
+                    let visible_count = project_replace_results.len().min(max_visible);
+                    // Title + search + replace + toggles + hint + results.
+                    let pr_h = line_h * (visible_count as f64 + 5.0) + style.padding_y * 2.0;
+                    let pr_y = style.padding_y * 2.0;
+
+                    draw_ctx.draw_rect(pr_x - 1.0, pr_y - 1.0, pr_w + 2.0, pr_h + 2.0, style.divider.to_array());
+                    draw_ctx.draw_rect(pr_x, pr_y, pr_w, pr_h, style.background3.to_array());
+
+                    // Title bar.
+                    let title_y = pr_y + style.padding_y;
+                    draw_ctx.draw_text(style.font, "Replace in Files", pr_x + style.padding_x, title_y, style.accent.to_array());
+                    let match_label = format!("  ({} matches)", project_replace_results.len());
+                    let tw = draw_ctx.font_width(style.font, "Replace in Files");
+                    draw_ctx.draw_text(style.font, &match_label, pr_x + style.padding_x + tw, title_y, style.dim.to_array());
+                    draw_ctx.draw_rect(pr_x, title_y + line_h, pr_w, style.divider_size, style.divider.to_array());
+
+                    // Search input.
+                    let row1_y = title_y + line_h;
+                    let search_cursor = if !project_replace_focus_on_replace { "_" } else { "" };
+                    let search_label = "Search: ";
+                    let sl_w = draw_ctx.font_width(style.font, search_label);
+                    draw_ctx.draw_text(style.font, search_label, pr_x + style.padding_x, row1_y, style.accent.to_array());
+                    draw_ctx.draw_text(style.font, &format!("{project_replace_search}{search_cursor}"), pr_x + style.padding_x + sl_w + style.padding_x, row1_y, style.text.to_array());
+
+                    // Replace input.
+                    let row2_y = row1_y + line_h;
+                    draw_ctx.draw_rect(pr_x, row2_y, pr_w, style.divider_size, style.divider.to_array());
+                    let replace_cursor = if project_replace_focus_on_replace { "_" } else { "" };
+                    let rl = "Replace: ";
+                    let rl_w = draw_ctx.font_width(style.font, rl);
+                    draw_ctx.draw_text(style.font, rl, pr_x + style.padding_x, row2_y, style.accent.to_array());
+                    draw_ctx.draw_text(style.font, &format!("{project_replace_with}{replace_cursor}"), pr_x + style.padding_x + rl_w + style.padding_x, row2_y, style.text.to_array());
+
+                    // Toggle hints.
+                    let toggles_y = row2_y + line_h;
+                    draw_ctx.draw_rect(pr_x, toggles_y, pr_w, style.divider_size, style.divider.to_array());
+                    let mark = |on: bool| if on { "[x]" } else { "[ ]" };
+                    let toggle_hint = format!(
+                        "Alt+R Regex {}  Alt+W Word {}  Alt+I Case {}",
+                        mark(project_use_regex), mark(project_whole_word), mark(project_case_insensitive),
+                    );
+                    draw_ctx.draw_text(style.font, &toggle_hint, pr_x + style.padding_x, toggles_y + style.padding_y * 0.5, style.dim.to_array());
+
+                    // Action hint row.
+                    let hint_y = toggles_y + line_h;
+                    draw_ctx.draw_rect(pr_x, hint_y, pr_w, style.divider_size, style.divider.to_array());
+                    let hint = "Tab switch fields  Enter preview  Ctrl+Enter replace all  Esc close";
+                    draw_ctx.draw_text(style.font, hint, pr_x + style.padding_x, hint_y + style.padding_y * 0.5, style.dim.to_array());
+
+                    // Results preview.
+                    let results_y = hint_y + line_h;
+                    draw_ctx.draw_rect(pr_x, results_y, pr_w, style.divider_size, style.divider.to_array());
+                    draw_ctx.draw_rect(pr_x, results_y, pr_w, style.divider_size, style.divider.to_array());
+                    let scroll_off = if project_replace_selected >= max_visible {
+                        project_replace_selected - max_visible + 1
+                    } else { 0 };
+                    for (i, (path, line_num, text)) in project_replace_results
+                        .iter().enumerate().skip(scroll_off).take(max_visible)
+                    {
+                        let di = i - scroll_off;
+                        let ry = results_y + style.divider_size + di as f64 * line_h;
+                        if i == project_replace_selected {
+                            draw_ctx.draw_rect(pr_x, ry, pr_w, line_h, style.selection.to_array());
+                        }
+                        let location = format!("{path}:{line_num}");
+                        let loc_color = if i == project_replace_selected { style.accent.to_array() } else { style.dim.to_array() };
+                        draw_ctx.draw_text(style.font, &location, pr_x + style.padding_x, ry + style.padding_y / 2.0, loc_color);
+                        let loc_w = draw_ctx.font_width(style.font, &location);
+                        let max_text_w = pr_w - style.padding_x * 3.0 - loc_w;
+                        if max_text_w > 0.0 {
+                            let char_w = draw_ctx.font_width(style.font, "m");
+                            let max_chars = (max_text_w / char_w).floor() as usize;
+                            let truncated: String = text.chars().take(max_chars).collect();
+                            draw_ctx.draw_text(style.font, &format!("  {truncated}"), pr_x + style.padding_x + loc_w, ry + style.padding_y / 2.0, style.text.to_array());
+                        }
                     }
                 }
 
