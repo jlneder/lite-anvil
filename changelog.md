@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.4.2] - 2026-04-10 — Minor render bug fix.
+
+* Tab and sidebar gap fix.
+
 ## [2.4.1] - 2026-04-10 — Scroll and rendering fixes.
 
 * Mouse wheel over sidebar scrolls sidebar only; over editor scrolls editor only.

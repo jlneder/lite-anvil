@@ -3403,7 +3403,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     if *y < tab_h && !docs.is_empty() {
                         use crate::editor::view::DrawContext as _;
                         let close_btn_w = draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
-                        let mut tx = sidebar_w + style.padding_x;
+                        let mut tx = sidebar_w;
                         let mut clicked_close = false;
                         for (i, doc) in docs.iter().enumerate() {
                             let tab_label = if doc_is_modified(doc) {
@@ -3574,7 +3574,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                             use crate::editor::view::DrawContext as _;
                             let sidebar_w = if sidebar_visible { sidebar_width } else { 0.0 };
                             let close_w = draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
-                            let mut tx = sidebar_w + style.padding_x;
+                            let mut tx = sidebar_w;
                             for (i, doc) in docs.iter().enumerate() {
                                 let label = if doc_is_modified(doc) { format!("*{}", doc.name) } else { doc.name.clone() };
                                 let tw = draw_ctx.font_width(style.font, &label) + style.padding_x * 2.0 + close_w + style.divider_size;
@@ -4384,7 +4384,7 @@ pub fn run(config: NativeConfig, _args: &[String], datadir: &str, userdir: &str)
                     let accent_h = 2.0;
                     use crate::editor::view::DrawContext as _;
                     draw_ctx.draw_rect(sidebar_w, 0.0, width - sidebar_w, tbh, style.background2.to_array());
-                    let mut tx = sidebar_w + style.padding_x;
+                    let mut tx = sidebar_w;
                     for (i, doc) in docs.iter().enumerate() {
                         let tab_label = if doc_is_modified(doc) {
                             format!("*{}", doc.name)
