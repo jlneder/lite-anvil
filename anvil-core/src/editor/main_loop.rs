@@ -5405,9 +5405,17 @@ pub fn run(
                 }
             }
 
-            // Ensure pending render cache is consumed on the next frame.
-            if pending_render_cache.is_some() {
-                redraw = true;
+            // Apply deferred render cache unconditionally so it never goes
+            // stale. This MUST be outside the `if redraw` block -- otherwise
+            // the cache sits unconsumed until the next event and forces an
+            // infinite render loop if we try to force redraw when pending.
+            if let Some((tab_idx, lines, cid, sy)) = pending_render_cache.take() {
+                if let Some(doc_mut) = docs.get_mut(tab_idx) {
+                    doc_mut.cached_render = lines;
+                    doc_mut.cached_change_id = cid;
+                    doc_mut.cached_scroll_y = sy;
+                    doc_mut.cached_hint_count = lsp_state.inlay_hints.len();
+                }
             }
 
             if redraw {
@@ -5938,15 +5946,6 @@ pub fn run(
                     crate::editor::app_state::clip_init(width, height);
                 }
 
-                // Apply deferred render cache from previous frame.
-                if let Some((tab_idx, lines, cid, sy)) = pending_render_cache.take() {
-                    if let Some(doc_mut) = docs.get_mut(tab_idx) {
-                        doc_mut.cached_render = lines;
-                        doc_mut.cached_change_id = cid;
-                        doc_mut.cached_scroll_y = sy;
-                        doc_mut.cached_hint_count = lsp_state.inlay_hints.len();
-                    }
-                }
                 if let Some(doc) = docs.get(active_tab) {
                     let dv = &doc.view;
                     if let Some(buf_id) = dv.buffer_id {

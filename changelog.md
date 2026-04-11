@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.6.4] - 2026-04-11 -- Fix render loop memory leak.
+
+* Fixed infinite render loop that boosted memory usage and CPU.
+
 ## [2.6.3] - 2026-04-11 -- macOS NanoAnvil.app, file cursor fix.
 
 * macOS: Nano-Anvil now ships as a separate NanoAnvil.app bundle with its own bundled dylibs. Fixes "libfreetype not found" when launching nano-anvil directly.
