@@ -108,6 +108,8 @@ Matching brackets colored by nesting depth (gold, pink, blue) like VS Code.
 
 Lite-Anvil is a fork of [Lite XL](https://github.com/lite-xl/lite-xl), rewritten from the ground up in Rust.
 
+Lite-Anvil also ships **Nano-Anvil**, a minimal single-file editor that uses software rendering (no GPU drivers), starts at ~28MB RAM, and omits the sidebar, terminal, LSP, git integration, and other heavy features. See the [Installation](installation/) page for details on both binaries.
+
 | | |
 |---|---|
 | **Languages** | 50+ syntax grammars, built-in LSP configurations |

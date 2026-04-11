@@ -1,0 +1,16 @@
+[package]
+name = "nano-anvil"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A minimal single-file editor built in Rust with SDL3"
+
+[[bin]]
+name = "nano-anvil"
+path = "src/main.rs"
+
+[dependencies]
+anvil-core = { path = "../anvil-core" }
+anyhow = "1.0.102"
+env_logger = "0.11.9"

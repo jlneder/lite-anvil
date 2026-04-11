@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[package\]$/ { in_section = 1; next }
+            /^\[workspace\.package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -41,6 +41,15 @@ jobs:
           cmake --build SDL/build
           sudo cmake --install SDL/build
 
+      - name: Build SDL3 (no-GL for Nano-Anvil)
+        run: |
+          cmake -S SDL -B SDL/build-nogl -DCMAKE_BUILD_TYPE=Release -G Ninja \
+            -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF \
+            -DSDL_GPU=OFF -DSDL_RENDER=OFF -DSDL_X11=ON -DSDL_WAYLAND=OFF
+          cmake --build SDL/build-nogl
+          mkdir -p lib/sdl3-nogl
+          cp -P SDL/build-nogl/libSDL3.so* lib/sdl3-nogl/
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/cache@v5
@@ -54,15 +63,20 @@ jobs:
             ${{ runner.os }}-${{ github.job }}-
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --workspace
 
       - name: Package
         run: |
           ARCHIVE_BASE="lite-anvil-${APP_VERSION}-linux-x86_64"
           mkdir "$ARCHIVE_BASE"
           cp target/release/lite-anvil "$ARCHIVE_BASE/"
+          cp target/release/nano-anvil "$ARCHIVE_BASE/"
           cp -r data "$ARCHIVE_BASE/"
+          cp -r data-nano "$ARCHIVE_BASE/"
+          mkdir -p "$ARCHIVE_BASE/lib/sdl3-nogl"
+          cp -P lib/sdl3-nogl/libSDL3.so* "$ARCHIVE_BASE/lib/sdl3-nogl/"
           cp resources/linux/com.lite_anvil.LiteAnvil.desktop "$ARCHIVE_BASE/"
+          cp resources/linux/com.nano_anvil.NanoAnvil.desktop "$ARCHIVE_BASE/"
           cp resources/icons/lite-anvil.png "$ARCHIVE_BASE/"
           tar -czf "${ARCHIVE_BASE}.tar.gz" "$ARCHIVE_BASE"
 
@@ -82,7 +96,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[package\]$/ { in_section = 1; next }
+            /^\[workspace\.package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -123,14 +137,16 @@ jobs:
             ${{ runner.os }}-${{ github.job }}-
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --workspace
 
       - name: Package
         run: |
           $archiveBase = "lite-anvil-$env:APP_VERSION-windows-x86_64"
           New-Item -ItemType Directory -Name $archiveBase
           Copy-Item target\release\lite-anvil.exe "$archiveBase\"
+          Copy-Item target\release\nano-anvil.exe "$archiveBase\"
           Copy-Item -Recurse data "$archiveBase\"
+          Copy-Item -Recurse data-nano "$archiveBase\"
           Copy-Item resources\windows\*.ps1 "$archiveBase\"
           Compress-Archive -Path $archiveBase -DestinationPath "$archiveBase.zip"
 
@@ -150,7 +166,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[package\]$/ { in_section = 1; next }
+            /^\[workspace\.package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -210,7 +226,7 @@ jobs:
           CLANG_RT=$(clang -arch x86_64 -print-file-name=libclang_rt.osx.a)
           export RUSTFLAGS="-C link-arg=$CLANG_RT \
             -C link-arg=-framework -C link-arg=UniformTypeIdentifiers"
-          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --workspace --target x86_64-apple-darwin
 
       - name: Create .app bundle
         run: |
@@ -345,6 +361,7 @@ jobs:
           rm -rf LiteAnvil.app
           mkdir -p LiteAnvil.app/Contents/MacOS LiteAnvil.app/Contents/Frameworks
           cp target/x86_64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
+          cp target/x86_64-apple-darwin/release/nano-anvil LiteAnvil.app/Contents/MacOS/
           cp -r data LiteAnvil.app/Contents/MacOS/
           bundle_macos_dylibs LiteAnvil.app
           sed "s/0\.19\.3/${APP_VERSION}/g" resources/macos/Info.plist > LiteAnvil.app/Contents/Info.plist
@@ -367,7 +384,7 @@ jobs:
         shell: bash
         run: |
           APP_VERSION="$(awk -F'"' '
-            /^\[package\]$/ { in_section = 1; next }
+            /^\[workspace\.package\]$/ { in_section = 1; next }
             /^\[/ { in_section = 0 }
             in_section && $1 ~ /^version = / { print $2; exit }
           ' Cargo.toml)"
@@ -391,7 +408,7 @@ jobs:
             ${{ runner.os }}-${{ github.job }}-
 
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --release --workspace --target aarch64-apple-darwin
 
       - name: Create .app bundle
         run: |
@@ -525,6 +542,7 @@ jobs:
           rm -rf LiteAnvil.app
           mkdir -p LiteAnvil.app/Contents/MacOS LiteAnvil.app/Contents/Frameworks
           cp target/aarch64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
+          cp target/aarch64-apple-darwin/release/nano-anvil LiteAnvil.app/Contents/MacOS/
           cp -r data LiteAnvil.app/Contents/MacOS/
           bundle_macos_dylibs LiteAnvil.app
           sed "s/0\.19\.3/${APP_VERSION}/g" resources/macos/Info.plist > LiteAnvil.app/Contents/Info.plist

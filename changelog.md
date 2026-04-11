@@ -1,5 +1,20 @@
 # Change Log
 
+## [2.6.0] - 2026-04-11 — Nano-Anvil, workspace refactor, lazy syntax loading, fixes.
+
+* **Nano-Anvil**: minimal single-file editor. Software-rendered (no GPU drivers), ~28MB RAM. No sidebar, terminal, LSP, git, find-in-files, bookmarks, code folding, or toolbar.
+* Cargo workspace: `anvil-core` (shared library), `lite-anvil` (full editor), `nano-anvil` (minimal editor).
+* Trait-based subsystem architecture for optional features.
+* Renamed `native_loop` to `main_loop`.
+* Lazy syntax loading: metadata-only index at startup, full parse on first use.
+* Sidebar folder expansion state persisted per project.
+* Save As uses built-in text input (Ctrl+Shift+S); native dialog available via palette.
+* Nano-Anvil: 2 fonts, halved glyph cache, no glyph prewarm, undo capped at 100, no-GL SDL3.
+* Fixed: save on untitled files opens Save As prompt.
+* Fixed: nag bar dismisses all overlays and appears immediately.
+* Fixed: autocomplete popup hidden during Save As input.
+* Desktop files for both Lite-Anvil and Nano-Anvil with full mime type coverage.
+
 ## [2.5.0] - 2026-04-10 — Replace in files, find/replace shortcut overhaul.
 
 * Replace in files (`Alt+Shift+F`): project-wide find-and-replace with live preview. Search input, replace input, Tab to switch fields, Enter to preview matches, Ctrl+Enter to execute replace across all matching files. Open buffers are reloaded after replacement.

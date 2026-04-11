@@ -22,7 +22,7 @@ die() { echo "error: $*" >&2; exit 1; }
 
 app_version() {
     awk -F'"' '
-        /^\[package\]$/ { in_section = 1; next }
+        /^\[workspace\.package\]$/ { in_section = 1; next }
         /^\[/ { in_section = 0 }
         in_section && $1 ~ /^version = / { print $2; exit }
     ' "$SCRIPT_DIR/Cargo.toml"
@@ -61,11 +61,45 @@ install_linux() {
     $sudo_cmd cp "$binary" "$bin_dir/lite-anvil"
     $sudo_cmd chmod 755 "$bin_dir/lite-anvil"
 
+    local nano_binary="$stage_dir/nano-anvil"
+    if [ -f "$nano_binary" ]; then
+        $sudo_cmd cp "$nano_binary" "$bin_dir/nano-anvil"
+        $sudo_cmd chmod 755 "$bin_dir/nano-anvil"
+    fi
+
     # Sync data directory; remove stale files from a previous install.
     $sudo_cmd rsync -a --delete "$data_src/" "$share_dir/" 2>/dev/null \
         || { $sudo_cmd rm -rf "$share_dir"; $sudo_cmd cp -r "$data_src/." "$share_dir/"; }
 
+    local data_nano_src="$stage_dir/data-nano"
+    if [ -d "$data_nano_src" ]; then
+        local share_nano_dir
+        if [ "$SYSTEM" -eq 1 ]; then
+            share_nano_dir=/usr/local/share/nano-anvil
+        else
+            share_nano_dir="$HOME/.local/share/nano-anvil"
+        fi
+        $sudo_cmd mkdir -p "$share_nano_dir"
+        $sudo_cmd rsync -a --delete "$data_nano_src/" "$share_nano_dir/" 2>/dev/null \
+            || { $sudo_cmd rm -rf "$share_nano_dir"; $sudo_cmd cp -r "$data_nano_src/." "$share_nano_dir/"; }
+    fi
+
+    local sdl3_nogl_src="$stage_dir/lib/sdl3-nogl"
+    if [ -d "$sdl3_nogl_src" ]; then
+        local lib_dir
+        if [ "$SYSTEM" -eq 1 ]; then
+            lib_dir=/usr/local/lib/nano-anvil
+        else
+            lib_dir="$HOME/.local/lib/nano-anvil"
+        fi
+        $sudo_cmd mkdir -p "$lib_dir"
+        $sudo_cmd cp -P "$sdl3_nogl_src"/libSDL3.so* "$lib_dir/"
+    fi
+
     $sudo_cmd cp "$stage_dir/com.lite_anvil.LiteAnvil.desktop" "$app_dir/lite-anvil.desktop"
+    if [ -f "$stage_dir/com.nano_anvil.NanoAnvil.desktop" ]; then
+        $sudo_cmd cp "$stage_dir/com.nano_anvil.NanoAnvil.desktop" "$app_dir/nano-anvil.desktop"
+    fi
     $sudo_cmd cp "$stage_dir/lite-anvil.png" "$icon_dir/lite-anvil.png"
 
     if command -v update-desktop-database >/dev/null 2>&1; then
@@ -76,7 +110,7 @@ install_linux() {
             "${icon_dir%/256x256/apps}" 2>/dev/null || true
     fi
 
-    echo "Installed to $bin_dir/lite-anvil"
+    echo "Installed lite-anvil and nano-anvil to $bin_dir/"
 
     if [ "$SYSTEM" -eq 0 ] && [[ ":${PATH}:" != *":$HOME/.local/bin:"* ]]; then
         echo "Note: $HOME/.local/bin is not in PATH — add it to your shell profile."
@@ -104,10 +138,18 @@ install_macos() {
     sudo mkdir -p /usr/local/bin
     sudo ln -sf "$app/Contents/MacOS/lite-anvil" "$cli_link"
 
+    local nano_cli=/usr/local/bin/nano-anvil
+    if [ -L "$nano_cli" ] || [ -f "$nano_cli" ]; then
+        sudo rm -f "$nano_cli"
+    fi
+    if [ -f "$app/Contents/MacOS/nano-anvil" ]; then
+        sudo ln -sf "$app/Contents/MacOS/nano-anvil" "$nano_cli"
+    fi
+
     local version
     version="$(app_version)"
-    echo "Installed Lite-Anvil ${version:-?} to $app"
-    echo "CLI symlink: $cli_link"
+    echo "Installed Lite-Anvil and Nano-Anvil ${version:-?} to $app"
+    echo "CLI symlinks: $cli_link, $nano_cli"
 }
 
 OS="$(uname)"

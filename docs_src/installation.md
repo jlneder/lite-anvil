@@ -9,6 +9,8 @@ description: Install Lite-Anvil from prebuilt binaries or build from source on L
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/danpozmanter/lite-anvil/releases).
 
+Release archives contain both the `lite-anvil` (full editor) and `nano-anvil` (minimal single-file editor) binaries. Install whichever you need, or both.
+
 ### Linux
 
 Extract the archive, copy the binary and data directory:

@@ -1,0 +1,31 @@
+[package]
+name = "lite-anvil"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A code editor built in Rust with SDL3"
+
+[package.metadata.deb]
+name = "lite-anvil"
+maintainer = "Lite-Anvil contributors"
+copyright = "MIT"
+extended-description = "A code editor built in Rust with SDL3."
+depends = "libsdl3-0, libfreetype6, libpcre2-8-0"
+section = "editors"
+priority = "optional"
+assets = [
+    ["target/release/lite-anvil", "usr/bin/", "755"],
+    ["data/**/*",                 "usr/share/lite-anvil/", "644"],
+    ["resources/linux/com.lite_anvil.LiteAnvil.desktop",
+                                  "usr/share/applications/lite-anvil.desktop", "644"],
+]
+
+[[bin]]
+name = "lite-anvil"
+path = "src/main.rs"
+
+[dependencies]
+anvil-core = { path = "../anvil-core" }
+anyhow = "1.0.102"
+env_logger = "0.11.9"

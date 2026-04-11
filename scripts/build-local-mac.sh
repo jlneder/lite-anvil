@@ -21,7 +21,7 @@ case "$HOST_ARCH" in
 esac
 
 VERSION="$(awk -F'"' '
-    /^\[package\]$/ { in_section = 1; next }
+    /^\[workspace\.package\]$/ { in_section = 1; next }
     /^\[/ { in_section = 0 }
     in_section && $1 ~ /^version = / { print $2; exit }
 ' Cargo.toml)"
@@ -222,6 +222,10 @@ sign_macos_app() {
 
     codesign --force --sign - --timestamp=none "$app/Contents/MacOS/lite-anvil"
 
+    if [ -f "$app/Contents/MacOS/nano-anvil" ]; then
+        codesign --force --sign - --timestamp=none "$app/Contents/MacOS/nano-anvil"
+    fi
+
     if [ -d "$app/Contents/Frameworks" ]; then
         local item
         while IFS= read -r item; do
@@ -235,7 +239,7 @@ sign_macos_app() {
     codesign --verify --deep --strict --verbose=2 "$app"
 }
 
-cargo build --release --target "$RUST_TARGET"
+cargo build --release --workspace --target "$RUST_TARGET"
 
 BINARY="target/$RUST_TARGET/release/lite-anvil"
 [ -f "$BINARY" ] || die "binary not found at $BINARY"
@@ -246,7 +250,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
 
 cp "$BINARY" "$APP/Contents/MacOS/lite-anvil"
 chmod 755 "$APP/Contents/MacOS/lite-anvil"
+
+NANO_BINARY="target/$RUST_TARGET/release/nano-anvil"
+if [ -f "$NANO_BINARY" ]; then
+    cp "$NANO_BINARY" "$APP/Contents/MacOS/nano-anvil"
+    chmod 755 "$APP/Contents/MacOS/nano-anvil"
+fi
+
 cp -r data "$APP/Contents/MacOS/data"
+cp -r data-nano "$APP/Contents/MacOS/data-nano"
 
 bundle_macos_dylibs "$APP"
 

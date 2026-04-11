@@ -13,7 +13,7 @@ $Version = ''
 if (Test-Path $CargoToml) {
     $inPackage = $false
     foreach ($line in Get-Content $CargoToml) {
-        if ($line -match '^\[package\]') { $inPackage = $true; continue }
+        if ($line -match '^\[workspace\.package\]') { $inPackage = $true; continue }
         if ($line -match '^\[') { $inPackage = $false }
         if ($inPackage -and $line -match '^version = "([^"]+)"$') {
             $Version = $Matches[1]
@@ -31,7 +31,7 @@ $DistDir = Join-Path $RootDir 'dist'
 $StageDir = Join-Path $DistDir $ArchiveBase
 $Archive = Join-Path $DistDir "$ArchiveBase.zip"
 
-cargo build --release
+cargo build --release --workspace
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $Binary = Join-Path $RootDir 'target\release\lite-anvil.exe'
@@ -40,12 +40,18 @@ if (-not (Test-Path $Binary)) {
     exit 1
 }
 
+$NanoBinary = Join-Path $RootDir 'target\release\nano-anvil.exe'
+
 if (Test-Path $StageDir) { Remove-Item -Recurse -Force $StageDir }
 if (Test-Path $Archive)  { Remove-Item -Force $Archive }
 New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 
 Copy-Item -Path $Binary -Destination $StageDir
+if (Test-Path $NanoBinary) {
+    Copy-Item -Path $NanoBinary -Destination $StageDir
+}
 Copy-Item -Path (Join-Path $RootDir 'data') -Destination $StageDir -Recurse
+Copy-Item -Path (Join-Path $RootDir 'data-nano') -Destination $StageDir -Recurse
 $WindowsResources = Join-Path $RootDir 'resources\windows\*.ps1'
 if (Test-Path $WindowsResources) {
     Copy-Item -Path $WindowsResources -Destination $StageDir
