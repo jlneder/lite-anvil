@@ -1,5 +1,13 @@
 # Change Log
 
+## [2.6.2] - 2026-04-11 — Session restore for unsaved files.
+
+* Lite-Anvil: unsaved files (including untitled buffers) are now restored on session resume.
+* Closing a single tab or switching projects still prompts to save unsaved changes.
+* Nano-Anvil: closing with unsaved changes still prompts (no session restore).
+* Unsaved files are now consistently named "untitled" everywhere.
+* Added Nano-Anvil section to user guide and site.
+
 ## [2.6.1] - 2026-04-11 — LSP Inlay hints fix.
 
 * Fixed: LSP inlay hints didn't display on initial editor load without scrolling.

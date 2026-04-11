@@ -702,6 +702,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#nano-anvil" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nano-Anvil
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Nano-Anvil">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#running-nano-anvil" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running Nano-Anvil
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#differences-from-lite-anvil" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Differences from Lite-Anvil
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keyboard-shortcuts-nano-anvil" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard Shortcuts (Nano-Anvil)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1431,6 +1481,83 @@
 <p>The <code>:N</code> line-number suffix also works in the file picker (<code>Ctrl+O</code>).</p>
 <h3 id="themes">Themes<a class="headerlink" href="#themes" title="Permanent link">&para;</a></h3>
 <p>Cycle themes with <code>Ctrl+Shift+P</code> or the command palette. JSON theme files are in <code>data/assets/themes/</code>.</p>
+<h2 id="nano-anvil">Nano-Anvil<a class="headerlink" href="#nano-anvil" title="Permanent link">&para;</a></h2>
+<p>Nano-Anvil is a minimal single-file editor included alongside Lite-Anvil.</p>
+<h3 id="running-nano-anvil">Running Nano-Anvil<a class="headerlink" href="#running-nano-anvil" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># From the release archive</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>./nano-anvil
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Open a specific file</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>./nano-anvil<span class="w"> </span>myfile.rs
+</code></pre></div>
+<p>On Linux, Nano-Anvil is also available as a desktop application (Nano-Anvil in your application menu).</p>
+<h3 id="differences-from-lite-anvil">Differences from Lite-Anvil<a class="headerlink" href="#differences-from-lite-anvil" title="Permanent link">&para;</a></h3>
+<p>Nano-Anvil is designed for lightweight, single-file editing:</p>
+<ul>
+<li>Single file at a time (no tabs, no project)</li>
+<li>No sidebar, terminal, LSP, git integration, bookmarks, or code folding</li>
+<li>Software rendering (no GPU driver loaded)</li>
+<li>~28MB RAM on Linux vs ~100MB for Lite-Anvil (on NVIDIA/X11)</li>
+<li>Syntax highlighting for 50+ languages (shared with Lite-Anvil)</li>
+<li>Find and replace within the current file</li>
+<li>Full undo/redo (capped at 100 entries)</li>
+<li>2 built-in themes (dark + light)</li>
+</ul>
+<h3 id="keyboard-shortcuts-nano-anvil">Keyboard Shortcuts (Nano-Anvil)<a class="headerlink" href="#keyboard-shortcuts-nano-anvil" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Ctrl+S</code></td>
+<td>Save (prompts for path if untitled)</td>
+</tr>
+<tr>
+<td><code>Ctrl+Shift+S</code></td>
+<td>Save As</td>
+</tr>
+<tr>
+<td><code>Ctrl+Q</code></td>
+<td>Quit</td>
+</tr>
+<tr>
+<td><code>Ctrl+F</code></td>
+<td>Find</td>
+</tr>
+<tr>
+<td><code>Alt+F</code></td>
+<td>Find and Replace</td>
+</tr>
+<tr>
+<td><code>Ctrl+Z</code></td>
+<td>Undo</td>
+</tr>
+<tr>
+<td><code>Ctrl+Y</code></td>
+<td>Redo</td>
+</tr>
+<tr>
+<td><code>Ctrl+A</code></td>
+<td>Select All</td>
+</tr>
+<tr>
+<td><code>Ctrl+C</code> / <code>Ctrl+X</code> / <code>Ctrl+V</code></td>
+<td>Copy / Cut / Paste</td>
+</tr>
+<tr>
+<td><code>Ctrl+P</code></td>
+<td>Command Palette</td>
+</tr>
+<tr>
+<td><code>Ctrl+=</code> / <code>Ctrl+-</code></td>
+<td>Zoom In / Out</td>
+</tr>
+</tbody>
+</table>
 
 
 

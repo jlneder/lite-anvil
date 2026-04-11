@@ -291,3 +291,48 @@ The `:N` line-number suffix also works in the file picker (`Ctrl+O`).
 ### Themes
 
 Cycle themes with `Ctrl+Shift+P` or the command palette. JSON theme files are in `data/assets/themes/`.
+
+## Nano-Anvil
+
+Nano-Anvil is a minimal single-file editor included alongside Lite-Anvil.
+
+### Running Nano-Anvil
+
+```bash
+# From the release archive
+./nano-anvil
+
+# Open a specific file
+./nano-anvil myfile.rs
+```
+
+On Linux, Nano-Anvil is also available as a desktop application (Nano-Anvil in your application menu).
+
+### Differences from Lite-Anvil
+
+Nano-Anvil is designed for lightweight, single-file editing:
+
+- Single file at a time (no tabs, no project)
+- No sidebar, terminal, LSP, git integration, bookmarks, or code folding
+- Software rendering (no GPU driver loaded)
+- ~28MB RAM on Linux vs ~100MB for Lite-Anvil (on NVIDIA/X11)
+- Syntax highlighting for 50+ languages (shared with Lite-Anvil)
+- Find and replace within the current file
+- Full undo/redo (capped at 100 entries)
+- 2 built-in themes (dark + light)
+
+### Keyboard Shortcuts (Nano-Anvil)
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+S` | Save (prompts for path if untitled) |
+| `Ctrl+Shift+S` | Save As |
+| `Ctrl+Q` | Quit |
+| `Ctrl+F` | Find |
+| `Alt+F` | Find and Replace |
+| `Ctrl+Z` | Undo |
+| `Ctrl+Y` | Redo |
+| `Ctrl+A` | Select All |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / Cut / Paste |
+| `Ctrl+P` | Command Palette |
+| `Ctrl+=` / `Ctrl+-` | Zoom In / Out |

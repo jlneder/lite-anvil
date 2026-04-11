@@ -102,6 +102,22 @@ Matching brackets colored by nesting depth (gold, pink, blue) like VS Code.
 
 </div>
 
+<div class="feature-card" markdown>
+
+### Nano-Anvil
+
+A minimal single-file editor with software rendering. No GPU driver overhead -- ~28MB RAM on Linux. No sidebar, terminal, LSP, git, or tabs.
+
+</div>
+
+<div class="feature-card" markdown>
+
+### Software Rendered
+
+Nano-Anvil bundles a no-GL SDL3 build, avoiding GPU driver libraries entirely. Ideal for low-resource environments, containers, or remote sessions.
+
+</div>
+
 </div>
 
 ## Overview

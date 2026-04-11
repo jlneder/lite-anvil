@@ -340,6 +340,8 @@ struct SessionData {
     active: usize,
     #[serde(default)]
     active_project: String,
+    #[serde(default)]
+    unsaved_content: Vec<String>,
 }
 
 /// Run the editor main loop. Returns true if restart requested.
@@ -615,15 +617,27 @@ pub fn run(
         if root == "." || root.is_empty() {
             return;
         }
-        let files: Vec<String> = docs
-            .iter()
-            .filter(|d| !d.path.is_empty())
-            .map(|d| d.path.clone())
-            .collect();
+        let mut files = Vec::new();
+        let mut unsaved_content = Vec::new();
+        for doc in docs {
+            if doc.path.is_empty() {
+                files.push("__untitled__".to_string());
+                let content = doc
+                    .view
+                    .buffer_id
+                    .and_then(|id| buffer::with_buffer(id, |b| Ok(b.lines.join(""))).ok())
+                    .unwrap_or_default();
+                unsaved_content.push(content);
+            } else {
+                files.push(doc.path.clone());
+                unsaved_content.push(String::new());
+            }
+        }
         let session = SessionData {
             files,
             active: active_tab,
             active_project: root.to_string(),
+            unsaved_content,
         };
         if let Ok(json) = serde_json::to_string_pretty(&session) {
             let _ = storage::save_text(
@@ -646,8 +660,38 @@ pub fn run(
         let key = project_session_key(root);
         let data = storage::load_text(userdir, "project_session", &key).ok()??;
         let session: SessionData = serde_json::from_str(&data).ok()?;
-        for file in &session.files {
-            if open_file_into(file, docs) {
+        for (i, file) in session.files.iter().enumerate() {
+            if file == "__untitled__" {
+                let buf_id = buffer::insert_buffer(buffer::default_buffer_state());
+                if let Some(content) = session.unsaved_content.get(i) {
+                    if !content.is_empty() {
+                        let _ = buffer::with_buffer_mut(buf_id, |b| {
+                            b.lines = content.lines().map(|l| format!("{l}\n")).collect();
+                            if b.lines.is_empty() {
+                                b.lines.push("\n".to_string());
+                            }
+                            b.change_id += 1;
+                            Ok(())
+                        });
+                    }
+                }
+                let mut dv = DocView::new();
+                dv.buffer_id = Some(buf_id);
+                docs.push(OpenDoc {
+                    view: dv,
+                    path: String::new(),
+                    name: "untitled".to_string(),
+                    saved_change_id: 1,
+                    saved_signature: buffer::content_signature(&["\n".to_string()]),
+                    indent_type: "soft".to_string(),
+                    indent_size: 2,
+                    git_changes: std::collections::HashMap::new(),
+                    cached_render: Vec::new(),
+                    cached_change_id: -1,
+                    cached_scroll_y: -1.0,
+                    cached_hint_count: 0,
+                });
+            } else if open_file_into(file, docs) {
                 autoreload.watch(file);
             }
         }
@@ -724,8 +768,41 @@ pub fn run(
     if !single_file_mode && !has_cli_files {
         if let Ok(Some(data)) = storage::load_text(userdir_path, "session", "files") {
             if let Ok(session) = serde_json::from_str::<SessionData>(&data) {
-                for file in &session.files {
-                    open_file_into(file, &mut docs);
+                for (i, file) in session.files.iter().enumerate() {
+                    if file == "__untitled__" {
+                        let buf_id = buffer::insert_buffer(buffer::default_buffer_state());
+                        if let Some(content) = session.unsaved_content.get(i) {
+                            if !content.is_empty() {
+                                let _ = buffer::with_buffer_mut(buf_id, |b| {
+                                    b.lines =
+                                        content.lines().map(|l| format!("{l}\n")).collect();
+                                    if b.lines.is_empty() {
+                                        b.lines.push("\n".to_string());
+                                    }
+                                    b.change_id += 1;
+                                    Ok(())
+                                });
+                            }
+                        }
+                        let mut dv = DocView::new();
+                        dv.buffer_id = Some(buf_id);
+                        docs.push(OpenDoc {
+                            view: dv,
+                            path: String::new(),
+                            name: "untitled".to_string(),
+                            saved_change_id: 1,
+                            saved_signature: buffer::content_signature(&["\n".to_string()]),
+                            indent_type: "soft".to_string(),
+                            indent_size: 2,
+                            git_changes: std::collections::HashMap::new(),
+                            cached_render: Vec::new(),
+                            cached_change_id: -1,
+                            cached_scroll_y: -1.0,
+                            cached_hint_count: 0,
+                        });
+                    } else {
+                        open_file_into(file, &mut docs);
+                    }
                 }
                 if session.active < docs.len() {
                     active_tab = session.active;
@@ -745,7 +822,7 @@ pub fn run(
         docs.push(OpenDoc {
             view: dv,
             path: String::new(),
-            name: "[untitled]".to_string(),
+            name: "untitled".to_string(),
             saved_change_id: initial_change_id,
             saved_signature: 0,
             indent_type: "soft".to_string(),
@@ -1459,7 +1536,7 @@ pub fn run(
             let cmd: String = $cmd_arg;
             match cmd.as_str() {
                 "core:quit" => {
-                    if docs.iter().any(doc_is_modified) {
+                    if single_file_mode && docs.iter().any(doc_is_modified) {
                         nag_active = true;
                         nag_message = "Unsaved changes. Save all?  [Y]es  [N]o  [Esc]Cancel".to_string();
                         nag_tab_to_close = None;
@@ -1483,7 +1560,7 @@ pub fn run(
                     docs.push(OpenDoc {
                         view: dv,
                         path: String::new(),
-                        name: "[new]".to_string(),
+                        name: "untitled".to_string(),
                         saved_change_id: 1,
                         saved_signature: buffer::content_signature(&["\n".to_string()]),
                         indent_type: "soft".to_string(),
@@ -2337,7 +2414,7 @@ pub fn run(
         while let Some(event) = crate::window::poll_event_native() {
             match &event {
                 EditorEvent::Quit => {
-                    if docs.iter().any(doc_is_modified) {
+                    if single_file_mode && docs.iter().any(doc_is_modified) {
                         nag_active = true;
                         redraw = true;
                         nag_message =
@@ -7437,11 +7514,22 @@ pub fn run(
     // Session save: persist open files, active tab, and project root via storage.
     // Save session state (Lite-Anvil only -- Nano-Anvil has no session).
     if !single_file_mode {
-        let open_files: Vec<String> = docs
-            .iter()
-            .filter(|d| !d.path.is_empty())
-            .map(|d| d.path.clone())
-            .collect();
+        let mut open_files = Vec::new();
+        let mut unsaved_content = Vec::new();
+        for doc in &docs {
+            if doc.path.is_empty() {
+                open_files.push("__untitled__".to_string());
+                let content = doc
+                    .view
+                    .buffer_id
+                    .and_then(|id| buffer::with_buffer(id, |b| Ok(b.lines.join(""))).ok())
+                    .unwrap_or_default();
+                unsaved_content.push(content);
+            } else {
+                open_files.push(doc.path.clone());
+                unsaved_content.push(String::new());
+            }
+        }
         let project_root_meaningful =
             project_root != "." && std::path::Path::new(&project_root).is_dir();
         if !open_files.is_empty() || project_root_meaningful {
@@ -7449,6 +7537,7 @@ pub fn run(
                 files: open_files,
                 active: active_tab,
                 active_project: project_root.clone(),
+                unsaved_content,
             };
             if let Ok(json) = serde_json::to_string_pretty(&session) {
                 if let Err(e) = storage::save_text(userdir_path, "session", "files", &json) {
