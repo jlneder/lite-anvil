@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.6.1] - 2026-04-11 — LSP Inlay hints fix.
+
+* Fixed: LSP inlay hints didn't display on initial editor load without scrolling.
+
 ## [2.6.0] - 2026-04-11 — Nano-Anvil, workspace refactor, lazy syntax loading, fixes.
 
 * **Nano-Anvil**: minimal single-file editor. Software-rendered (no GPU drivers), ~28MB RAM. No sidebar, terminal, LSP, git, find-in-files, bookmarks, code folding, or toolbar.

@@ -4850,10 +4850,15 @@ pub fn run(
                                         );
                                         lsp_state.inlay_retry_count += 1;
                                     }
-                                    // Force full screen repaint so hints appear immediately.
-                                    // The dirty-rect cache may not detect hint text changes
-                                    // if the cell hashes happen to collide.
                                     if !lsp_state.inlay_hints.is_empty() {
+                                        // Discard any pending render cache -- it was built
+                                        // WITHOUT these hints and would poison the cache
+                                        // with the wrong hint count.
+                                        pending_render_cache = None;
+                                        // Invalidate all docs so hints are re-baked.
+                                        for d in &mut docs {
+                                            d.cached_change_id = -1;
+                                        }
                                         crate::window::force_invalidate();
                                     }
                                     redraw = true;
