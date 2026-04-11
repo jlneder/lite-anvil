@@ -361,12 +361,52 @@ jobs:
           rm -rf LiteAnvil.app
           mkdir -p LiteAnvil.app/Contents/MacOS LiteAnvil.app/Contents/Frameworks
           cp target/x86_64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
-          cp target/x86_64-apple-darwin/release/nano-anvil LiteAnvil.app/Contents/MacOS/
           cp -r data LiteAnvil.app/Contents/MacOS/
           bundle_macos_dylibs LiteAnvil.app
           sed "s/0\.19\.3/${APP_VERSION}/g" resources/macos/Info.plist > LiteAnvil.app/Contents/Info.plist
           otool -L LiteAnvil.app/Contents/MacOS/lite-anvil
-          zip -r "lite-anvil-${APP_VERSION}-macos-x86_64.zip" LiteAnvil.app
+
+          # Create NanoAnvil.app bundle
+          rm -rf NanoAnvil.app
+          mkdir -p NanoAnvil.app/Contents/MacOS NanoAnvil.app/Contents/Frameworks
+          cp target/x86_64-apple-darwin/release/nano-anvil NanoAnvil.app/Contents/MacOS/
+          cp -r data NanoAnvil.app/Contents/MacOS/
+          cp -R LiteAnvil.app/Contents/Frameworks/* NanoAnvil.app/Contents/Frameworks/ 2>/dev/null || true
+
+          for dep in $(otool -L NanoAnvil.app/Contents/MacOS/nano-anvil | tail -n +2 | awk '{print $1}'); do
+              case "$dep" in
+                  /System/Library/*|/usr/lib/*|@executable_path/*|@loader_path/*) continue ;;
+              esac
+              dep_name="$(basename "$dep")"
+              if [ -f "NanoAnvil.app/Contents/Frameworks/$dep_name" ]; then
+                  install_name_tool -change "$dep" "@executable_path/../Frameworks/$dep_name" NanoAnvil.app/Contents/MacOS/nano-anvil
+              fi
+          done
+
+          cat > NanoAnvil.app/Contents/Info.plist << 'NANOEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key><string>Nano-Anvil</string>
+              <key>CFBundleDisplayName</key><string>Nano-Anvil</string>
+              <key>CFBundleIdentifier</key><string>com.nano-anvil.NanoAnvil</string>
+              <key>CFBundleVersion</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleExecutable</key><string>nano-anvil</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+              <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          NANOEOF
+          sed -i '' "s/VERSION_PLACEHOLDER/${APP_VERSION}/g" NanoAnvil.app/Contents/Info.plist
+
+          xattr -cr NanoAnvil.app 2>/dev/null || true
+          codesign --force --deep --sign - --timestamp=none NanoAnvil.app
+          otool -L NanoAnvil.app/Contents/MacOS/nano-anvil
+
+          zip -r "lite-anvil-${APP_VERSION}-macos-x86_64.zip" LiteAnvil.app NanoAnvil.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -542,12 +582,52 @@ jobs:
           rm -rf LiteAnvil.app
           mkdir -p LiteAnvil.app/Contents/MacOS LiteAnvil.app/Contents/Frameworks
           cp target/aarch64-apple-darwin/release/lite-anvil LiteAnvil.app/Contents/MacOS/
-          cp target/aarch64-apple-darwin/release/nano-anvil LiteAnvil.app/Contents/MacOS/
           cp -r data LiteAnvil.app/Contents/MacOS/
           bundle_macos_dylibs LiteAnvil.app
           sed "s/0\.19\.3/${APP_VERSION}/g" resources/macos/Info.plist > LiteAnvil.app/Contents/Info.plist
           otool -L LiteAnvil.app/Contents/MacOS/lite-anvil
-          zip -r "lite-anvil-${APP_VERSION}-macos-aarch64.zip" LiteAnvil.app
+
+          # Create NanoAnvil.app bundle
+          rm -rf NanoAnvil.app
+          mkdir -p NanoAnvil.app/Contents/MacOS NanoAnvil.app/Contents/Frameworks
+          cp target/aarch64-apple-darwin/release/nano-anvil NanoAnvil.app/Contents/MacOS/
+          cp -r data NanoAnvil.app/Contents/MacOS/
+          cp -R LiteAnvil.app/Contents/Frameworks/* NanoAnvil.app/Contents/Frameworks/ 2>/dev/null || true
+
+          for dep in $(otool -L NanoAnvil.app/Contents/MacOS/nano-anvil | tail -n +2 | awk '{print $1}'); do
+              case "$dep" in
+                  /System/Library/*|/usr/lib/*|@executable_path/*|@loader_path/*) continue ;;
+              esac
+              dep_name="$(basename "$dep")"
+              if [ -f "NanoAnvil.app/Contents/Frameworks/$dep_name" ]; then
+                  install_name_tool -change "$dep" "@executable_path/../Frameworks/$dep_name" NanoAnvil.app/Contents/MacOS/nano-anvil
+              fi
+          done
+
+          cat > NanoAnvil.app/Contents/Info.plist << 'NANOEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key><string>Nano-Anvil</string>
+              <key>CFBundleDisplayName</key><string>Nano-Anvil</string>
+              <key>CFBundleIdentifier</key><string>com.nano-anvil.NanoAnvil</string>
+              <key>CFBundleVersion</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleExecutable</key><string>nano-anvil</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+              <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          NANOEOF
+          sed -i '' "s/VERSION_PLACEHOLDER/${APP_VERSION}/g" NanoAnvil.app/Contents/Info.plist
+
+          xattr -cr NanoAnvil.app 2>/dev/null || true
+          codesign --force --deep --sign - --timestamp=none NanoAnvil.app
+          otool -L NanoAnvil.app/Contents/MacOS/nano-anvil
+
+          zip -r "lite-anvil-${APP_VERSION}-macos-aarch64.zip" LiteAnvil.app NanoAnvil.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

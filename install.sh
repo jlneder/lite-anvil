@@ -138,17 +138,29 @@ install_macos() {
     sudo mkdir -p /usr/local/bin
     sudo ln -sf "$app/Contents/MacOS/lite-anvil" "$cli_link"
 
+    local nano_app=/Applications/NanoAnvil.app
+    local built_nano_app="$SCRIPT_DIR/dist/NanoAnvil.app"
+    if [ -d "$built_nano_app" ]; then
+        rm -rf "$nano_app"
+        cp -R "$built_nano_app" "$nano_app"
+        xattr -cr "$nano_app" 2>/dev/null || true
+        codesign --force --deep --sign - --timestamp=none "$nano_app" >/dev/null 2>&1 || true
+    fi
+
     local nano_cli=/usr/local/bin/nano-anvil
     if [ -L "$nano_cli" ] || [ -f "$nano_cli" ]; then
         sudo rm -f "$nano_cli"
     fi
-    if [ -f "$app/Contents/MacOS/nano-anvil" ]; then
-        sudo ln -sf "$app/Contents/MacOS/nano-anvil" "$nano_cli"
+    if [ -d "$nano_app" ]; then
+        sudo ln -sf "$nano_app/Contents/MacOS/nano-anvil" "$nano_cli"
     fi
 
     local version
     version="$(app_version)"
-    echo "Installed Lite-Anvil and Nano-Anvil ${version:-?} to $app"
+    echo "Installed Lite-Anvil ${version:-?} to $app"
+    if [ -d "$nano_app" ]; then
+        echo "Installed Nano-Anvil ${version:-?} to $nano_app"
+    fi
     echo "CLI symlinks: $cli_link, $nano_cli"
 }
 

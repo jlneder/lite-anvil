@@ -7261,19 +7261,24 @@ pub fn run(
                         input_y,
                         style.accent.to_array(),
                     );
-                    // Render text with the caret '_' positioned at cmdview_cursor.
+                    // Render text with a vertical bar caret at cmdview_cursor.
+                    let text_x = cv_x + style.padding_x + label_w + style.padding_x;
                     let cursor_safe = cmdview_cursor.min(cmdview_text.len());
-                    let display = format!(
-                        "{}_{}",
-                        &cmdview_text[..cursor_safe],
-                        &cmdview_text[cursor_safe..],
-                    );
                     draw_ctx.draw_text(
                         style.font,
-                        &display,
-                        cv_x + style.padding_x + label_w + style.padding_x,
+                        &cmdview_text,
+                        text_x,
                         input_y,
                         style.text.to_array(),
+                    );
+                    let before_cursor = &cmdview_text[..cursor_safe];
+                    let caret_x = text_x + draw_ctx.font_width(style.font, before_cursor);
+                    draw_ctx.draw_rect(
+                        caret_x,
+                        input_y,
+                        style.caret_width,
+                        style.font_height,
+                        style.caret.to_array(),
                     );
 
                     // Divider below input.

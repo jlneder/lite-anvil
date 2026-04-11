@@ -251,22 +251,85 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
 cp "$BINARY" "$APP/Contents/MacOS/lite-anvil"
 chmod 755 "$APP/Contents/MacOS/lite-anvil"
 
-NANO_BINARY="target/$RUST_TARGET/release/nano-anvil"
-if [ -f "$NANO_BINARY" ]; then
-    cp "$NANO_BINARY" "$APP/Contents/MacOS/nano-anvil"
-    chmod 755 "$APP/Contents/MacOS/nano-anvil"
-fi
-
 cp -r data "$APP/Contents/MacOS/data"
-cp -r data-nano "$APP/Contents/MacOS/data-nano"
 
 bundle_macos_dylibs "$APP"
 
 sed "s/0\.19\.3/${VERSION}/g" resources/macos/Info.plist > "$APP/Contents/Info.plist"
 
+# Build NanoAnvil.app as a separate bundle.
+NANO_BINARY="target/$RUST_TARGET/release/nano-anvil"
+NANO_APP="$DIST_DIR/NanoAnvil.app"
+if [ -f "$NANO_BINARY" ]; then
+    rm -rf "$NANO_APP"
+    mkdir -p "$NANO_APP/Contents/MacOS" "$NANO_APP/Contents/Frameworks"
+    cp "$NANO_BINARY" "$NANO_APP/Contents/MacOS/nano-anvil"
+    chmod 755 "$NANO_APP/Contents/MacOS/nano-anvil"
+    cp -r data "$NANO_APP/Contents/MacOS/data"
+
+    # Rewrite bundle_macos_dylibs for nano-anvil binary.
+    bundle_macos_dylibs_nano() {
+        local app="$1"
+        local binary="$app/Contents/MacOS/nano-anvil"
+        local frameworks_dir="$app/Contents/Frameworks"
+        local processed_list="$frameworks_dir/.bundled-dylibs"
+        local queued_list="$frameworks_dir/.bundled-queue"
+
+        mkdir -p "$frameworks_dir"
+        : > "$processed_list"
+        : > "$queued_list"
+
+        bundle_macos_binary_deps "$binary"
+
+        local queue_index=1
+        local queued_dep
+        while queued_dep="$(sed -n "${queue_index}p" "$queued_list")" && [ -n "$queued_dep" ]; do
+            local nested_dep
+            while IFS= read -r nested_dep; do
+                macos_should_bundle_dep "$nested_dep" || continue
+                bundle_macos_dep "$queued_dep" "$nested_dep"
+            done < <(macos_list_deps "$queued_dep")
+            queue_index=$((queue_index + 1))
+        done
+
+        rm -f "$processed_list" "$queued_list"
+    }
+    bundle_macos_dylibs_nano "$NANO_APP"
+
+    # NanoAnvil Info.plist.
+    cat > "$NANO_APP/Contents/Info.plist" << PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Nano-Anvil</string>
+    <key>CFBundleDisplayName</key>
+    <string>Nano-Anvil</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.nano-anvil.NanoAnvil</string>
+    <key>CFBundleVersion</key>
+    <string>${VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+    <key>CFBundleExecutable</key>
+    <string>nano-anvil</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
+PLISTEOF
+
+    sign_macos_app "$NANO_APP"
+fi
+
 sign_macos_app "$APP"
 
-(cd "$DIST_DIR" && zip -qry "$(basename "$ARCHIVE")" LiteAnvil.app)
+(cd "$DIST_DIR" && zip -qry "$(basename "$ARCHIVE")" LiteAnvil.app NanoAnvil.app)
 
 echo "Built archive: $ARCHIVE"
-echo "App bundle:    $APP"
+echo "App bundles:   $APP, $NANO_APP"

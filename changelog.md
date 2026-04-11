@@ -1,6 +1,12 @@
 # Change Log
 
-## [2.6.2] - 2026-04-11 — Session restore for unsaved files.
+## [2.6.3] - 2026-04-11 -- macOS NanoAnvil.app, file cursor fix.
+
+* macOS: Nano-Anvil now ships as a separate NanoAnvil.app bundle with its own bundled dylibs. Fixes "libfreetype not found" when launching nano-anvil directly.
+* macOS: install.sh installs both LiteAnvil.app and NanoAnvil.app to /Applications with CLI symlinks.
+* File picker and Save As cursor changed from underscore to vertical bar caret, matching the editor cursor style.
+
+## [2.6.2] - 2026-04-11 -- Session restore for unsaved files.
 
 * Lite-Anvil: unsaved files (including untitled buffers) are now restored on session resume.
 * Closing a single tab or switching projects still prompts to save unsaved changes.
