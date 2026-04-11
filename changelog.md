@@ -1,9 +1,13 @@
 # Change Log
 
+## [2.7.4] - 2026-04-11 -- macOS & windows rendering fix.
+
+* Fixed blank window on macOS: `SDL_RENDER` is now kept enabled on macOS and Windows (required for Metal/GDI surface presentation).
+
 ## [2.7.3] - 2026-04-11 -- macOS SDL3 bundling fix.
 
-* Fixed macOS launch failure: `@rpath/libSDL3.0.dylib` was not being copied to `Contents/Frameworks/` because `macos_should_bundle_dep` in the CI scripts did not recognize `@rpath/` prefixed library references. Both local and CI build scripts now bundle `@rpath/` dependencies correctly.
-* macOS `install-mac.sh` uses `xattr -dr com.apple.quarantine` for targeted quarantine removal.
+* Fixed `@rpath/libSDL3.0.dylib` not being copied to `Contents/Frameworks/`.
+* macOS `install-mac.sh` uses `xattr -dr com.apple.quarantine`.
 
 ## [2.7.2] - 2026-04-11 -- macOS install script, RPATH fix.
 

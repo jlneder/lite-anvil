@@ -123,7 +123,7 @@ jobs:
           git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
           cmake -S SDL -B SDL\build -DCMAKE_BUILD_TYPE=Release `
             -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF `
-            -DSDL_GPU=OFF -DSDL_RENDER=OFF `
+            -DSDL_GPU=OFF `
             -DCMAKE_INSTALL_PREFIX=C:\sdl3-nogl
           cmake --build SDL\build --config Release
           cmake --install SDL\build --config Release
@@ -187,7 +187,7 @@ jobs:
           cmake -S SDL -B SDL/build $COMMON \
             -DSDL_SHARED=OFF -DSDL_STATIC=ON \
             -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF \
-            -DSDL_GPU=OFF -DSDL_RENDER=OFF \
+            -DSDL_GPU=OFF \
             -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF \
             -DSDL_CAMERA=OFF
           cmake --build SDL/build
@@ -450,7 +450,7 @@ jobs:
           git clone --depth 1 --branch release-3.4.2 https://github.com/libsdl-org/SDL.git
           cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -G Ninja \
             -DSDL_OPENGL=OFF -DSDL_OPENGLES=OFF -DSDL_VULKAN=OFF \
-            -DSDL_GPU=OFF -DSDL_RENDER=OFF \
+            -DSDL_GPU=OFF \
             -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF \
             -DSDL_CAMERA=OFF
           cmake --build SDL/build
