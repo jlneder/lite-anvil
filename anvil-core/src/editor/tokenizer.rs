@@ -201,16 +201,18 @@ pub fn compile_regex(pattern: &str) -> Result<Regex, RegexError> {
 /// Expand a `%x` Lua class inside a character class `[...]`.
 fn lua_class_to_regex_in_bracket(ch: char) -> &'static str {
     match ch {
-        'a' => "a-zA-Z",
-        'A' => "^a-zA-Z", // only valid as first element
+        'a' => "\\p{L}",
+        'A' => "\\P{L}",
         'd' => "0-9",
         'D' => "^0-9",
-        'w' => "a-zA-Z0-9_",
-        'W' => "^a-zA-Z0-9_",
+        'w' => "\\w\\p{M}",
+        'W' => "^\\w\\p{M}",
         's' => "\\s",
         'S' => "\\S",
-        'l' => "a-z",
-        'u' => "A-Z",
+        'l' => "\\p{Ll}",
+        'L' => "\\P{Ll}",
+        'u' => "\\p{Lu}",
+        'U' => "\\P{Lu}",
         'p' => "!-/:-@\\[-`{-~",
         _ => "",
     }
@@ -219,18 +221,18 @@ fn lua_class_to_regex_in_bracket(ch: char) -> &'static str {
 /// Expand a `%x` Lua class outside brackets.
 fn lua_class_to_regex(ch: char) -> &'static str {
     match ch {
-        'a' => "[a-zA-Z]",
-        'A' => "[^a-zA-Z]",
+        'a' => "\\p{L}",
+        'A' => "\\P{L}",
         'd' => "\\d",
         'D' => "\\D",
-        'w' => "\\w",
-        'W' => "\\W",
+        'w' => "[\\w\\p{M}]",
+        'W' => "[^\\w\\p{M}]",
         's' => "\\s",
         'S' => "\\S",
-        'l' => "[a-z]",
-        'L' => "[^a-z]",
-        'u' => "[A-Z]",
-        'U' => "[^A-Z]",
+        'l' => "\\p{Ll}",
+        'L' => "\\P{Ll}",
+        'u' => "\\p{Lu}",
+        'U' => "\\P{Lu}",
         'p' => "[^\\w\\s]",
         'P' => "[\\w\\s]",
         'c' => "[\\x00-\\x1f]",
@@ -531,6 +533,39 @@ pub fn compile_from_definition(def: &SyntaxDefinition) -> Result<CompiledSyntax,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    fn data_dir() -> String {
+        for candidate in ["data", "../data"] {
+            if Path::new(candidate).join("assets/syntax").is_dir() {
+                return candidate.to_string();
+            }
+        }
+        panic!("cannot locate data/ directory");
+    }
+
+    fn compile_single_pattern(pattern: &str, token_type: &str) -> CompiledSyntax {
+        let def = SyntaxDefinition {
+            name: "Test".into(),
+            patterns: vec![crate::editor::syntax::PatternRule {
+                pattern: Some(PatternSpec::Single(pattern.into())),
+                regex: None,
+                token_type: TokenType::Single(token_type.into()),
+                syntax: None,
+            }],
+            ..Default::default()
+        };
+        compile_from_definition(&def).unwrap()
+    }
+
+    fn markdown_syntax() -> CompiledSyntax {
+        let defs = crate::editor::syntax::load_syntax_assets(&data_dir());
+        let def = defs
+            .into_iter()
+            .find(|def| def.name == "Markdown")
+            .expect("should load Markdown syntax asset");
+        compile_from_definition(&def).expect("should compile Markdown syntax")
+    }
 
     #[test]
     fn char_len_ascii() {
@@ -664,5 +699,80 @@ mod tests {
         assert!(!results.is_empty());
         assert_eq!(results[0], 5); // '1' is at char position 5
         assert_eq!(results[1], 7); // '3' is at char position 7
+    }
+
+    #[test]
+    fn lua_pattern_to_regex_uses_unicode_properties() {
+        assert_eq!(lua_pattern_to_regex("%a"), r"\p{L}");
+        assert_eq!(lua_pattern_to_regex("[%a_]"), r"[\p{L}_]");
+        assert_eq!(lua_pattern_to_regex("[%w_]"), r"[\w\p{M}_]");
+        assert_eq!(lua_pattern_to_regex("%u"), r"\p{Lu}");
+        assert_eq!(lua_pattern_to_regex("%l"), r"\p{Ll}");
+    }
+
+    #[test]
+    fn tokenize_line_matches_unicode_words() {
+        let syntax = compile_single_pattern("[%a_][%w_]*", "symbol");
+        for line in [
+            "\u{00E1}rv\u{00ED}zt\u{0171}r\u{0151}",
+            "f\u{00FC}ggv\u{00E9}ny_1",
+            "a\u{0301}r",
+        ] {
+            let tokens = tokenize_line(&syntax, line);
+            assert_eq!(
+                tokens,
+                vec![Token {
+                    token_type: "symbol".into(),
+                    text: line.into(),
+                }],
+                "expected full-line symbol token for {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tokenize_line_matches_unicode_case_classes() {
+        let syntax = compile_single_pattern("<[%u%l][%w_%.:-]*>", "tag");
+        let line = "<\u{00C1}rWidget>";
+        let tokens = tokenize_line(&syntax, line);
+        assert_eq!(
+            tokens,
+            vec![Token {
+                token_type: "tag".into(),
+                text: line.into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn markdown_asset_highlights_unicode_italic_text() {
+        let syntax = markdown_syntax();
+        let line = "_\u{00E1}rv\u{00ED}zt\u{0171}r\u{0151}_";
+        let tokens = tokenize_line(&syntax, line);
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<String>(),
+            line
+        );
+        assert!(
+            tokens.iter().any(|token| token.token_type != "normal"),
+            "expected Markdown syntax to apply a non-normal token to {line:?}"
+        );
+    }
+
+    #[test]
+    fn markdown_asset_highlights_unicode_heading_text() {
+        let syntax = markdown_syntax();
+        let line = "# \u{00C1}rv\u{00ED}zt\u{0171}r\u{0151} t\u{00FC}k\u{00F6}rf\u{00FA}r\u{00F3}g\u{00E9}p {#arvizturo}";
+        let tokens = tokenize_line(&syntax, line);
+        assert_eq!(
+            tokens,
+            vec![Token {
+                token_type: "keyword".into(),
+                text: line.into(),
+            }]
+        );
     }
 }
