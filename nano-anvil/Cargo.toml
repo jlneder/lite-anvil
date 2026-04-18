@@ -6,32 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 description = "A minimal single-file editor built in Rust with SDL3"
 
-[package.metadata.deb]
-name = "nano-anvil"
-maintainer = "Nano-Anvil contributors"
-copyright = "MIT"
-extended-description = "A minimal single-file editor built in Rust with SDL3."
-depends = "$auto"
-section = "editors"
-priority = "optional"
-assets = [
-    ["target/release/nano-anvil",                            "usr/bin/",                                              "755"],
-    ["../data-nano/**/*",                                    "usr/share/nano-anvil/data/",                            "644"],
-    ["../resources/linux/com.nano_anvil.NanoAnvil.desktop",  "usr/share/applications/nano-anvil.desktop",             "644"],
-    ["../resources/icons/nano-anvil.png",                    "usr/share/icons/hicolor/256x256/apps/nano-anvil.png",   "644"],
-]
-
-[package.metadata.generate-rpm]
-name = "nano-anvil"
-license = "MIT"
-summary = "A minimal single-file editor built in Rust with SDL3"
-assets = [
-    { source = "target/release/nano-anvil",                           dest = "/usr/bin/nano-anvil",                                  mode = "755" },
-    { source = "../resources/linux/com.nano_anvil.NanoAnvil.desktop", dest = "/usr/share/applications/nano-anvil.desktop",          mode = "644" },
-    { source = "../resources/icons/nano-anvil.png",                   dest = "/usr/share/icons/hicolor/256x256/apps/nano-anvil.png", mode = "644" },
-    { source = "../data-nano/**/*",                                   dest = "/usr/share/nano-anvil/data/",                          mode = "644" },
-]
-
 [[bin]]
 name = "nano-anvil"
 path = "src/main.rs"

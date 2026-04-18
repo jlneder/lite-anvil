@@ -75,16 +75,14 @@ jobs:
       - name: Install packaging tools
         run: cargo install --locked cargo-deb cargo-generate-rpm
 
-      - name: Build .deb packages
+      - name: Build .deb package
         run: |
           cargo deb --no-build -p lite-anvil
-          cargo deb --no-build -p nano-anvil
           mv target/debian/*.deb .
 
-      - name: Build .rpm packages
+      - name: Build .rpm package
         run: |
           cargo generate-rpm -p lite-anvil
-          cargo generate-rpm -p nano-anvil
           mv target/generate-rpm/*.rpm .
 
       - name: Build AppImages
@@ -473,25 +471,14 @@ jobs:
           codesign --force --deep --sign - --timestamp=none NanoAnvil.app
           otool -L NanoAnvil.app/Contents/MacOS/nano-anvil
 
-          DMG_STAGE="dmg-staging"
-          rm -rf "$DMG_STAGE"
-          mkdir -p "$DMG_STAGE"
-          cp -R LiteAnvil.app "$DMG_STAGE/"
-          cp -R NanoAnvil.app "$DMG_STAGE/"
-          ln -s /Applications "$DMG_STAGE/Applications"
-
-          DMG_NAME="lite-anvil-${APP_VERSION}-macos-x86_64.dmg"
-          hdiutil create \
-            -volname "Lite-Anvil ${APP_VERSION}" \
-            -srcfolder "$DMG_STAGE" \
-            -ov -format UDZO \
-            "$DMG_NAME"
+          cp scripts/install-mac.sh .
+          zip -r "lite-anvil-${APP_VERSION}-macos-x86_64.zip" LiteAnvil.app NanoAnvil.app install-mac.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
           name: lite-anvil-macos-x86_64
-          path: lite-anvil-*-macos-x86_64.dmg
+          path: lite-anvil-*-macos-x86_64.zip
 
   build-macos-arm:
     name: macOS Apple Silicon (aarch64)
@@ -735,25 +722,14 @@ jobs:
           codesign --force --deep --sign - --timestamp=none NanoAnvil.app
           otool -L NanoAnvil.app/Contents/MacOS/nano-anvil
 
-          DMG_STAGE="dmg-staging"
-          rm -rf "$DMG_STAGE"
-          mkdir -p "$DMG_STAGE"
-          cp -R LiteAnvil.app "$DMG_STAGE/"
-          cp -R NanoAnvil.app "$DMG_STAGE/"
-          ln -s /Applications "$DMG_STAGE/Applications"
-
-          DMG_NAME="lite-anvil-${APP_VERSION}-macos-aarch64.dmg"
-          hdiutil create \
-            -volname "Lite-Anvil ${APP_VERSION}" \
-            -srcfolder "$DMG_STAGE" \
-            -ov -format UDZO \
-            "$DMG_NAME"
+          cp scripts/install-mac.sh .
+          zip -r "lite-anvil-${APP_VERSION}-macos-aarch64.zip" LiteAnvil.app NanoAnvil.app install-mac.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
           name: lite-anvil-macos-aarch64
-          path: lite-anvil-*-macos-aarch64.dmg
+          path: lite-anvil-*-macos-aarch64.zip
 
   release:
     name: Create Release
@@ -770,8 +746,8 @@ jobs:
       - name: Collect release files
         run: |
           find artifacts -mindepth 2 -maxdepth 2 -type f \
-            \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \
-               -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.exe' \) \
+            \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' \
+               -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.exe' \) \
             -exec mv {} artifacts/ \;
 
       - uses: softprops/action-gh-release@v2
@@ -779,8 +755,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             artifacts/*.tar.gz
+            artifacts/*.zip
             artifacts/*.deb
             artifacts/*.rpm
             artifacts/*.AppImage
-            artifacts/*.dmg
             artifacts/*.exe

@@ -1,5 +1,11 @@
 # Change Log
 
+## [2.9.6] - 2026-04-18 -- Windows installer Start Menu fix; single combined Linux .deb / .rpm; Mac reverted to zip + install.sh.
+
+* Windows installer: Start Menu group is now "Lite-Anvil" instead of "Lite-Anvil contributors".
+* Linux: release now publishes a single `lite-anvil_*.deb` and single `lite-anvil-*.rpm` containing both editors (binaries + data under `/usr/share/{lite,nano}-anvil/data/` + both `.desktop` entries + icons) instead of two packages per format.
+* macOS: reverted the 2.9.4 switch to `.dmg` — macOS Sequoia's Gatekeeper no longer honors the right-click → *Open* bypass for ad-hoc signed apps, so drag-to-Applications hits a hard "malware" block. Release ships `lite-anvil-*-macos-{x86_64,aarch64}.zip` with `install-mac.sh` again: the script invoked via `bash` clears quarantine + codesigns without Gatekeeper interference (quarantine is enforced on app launch, not on interpreted scripts).
+
 ## [2.9.5] - 2026-04-17 -- CI fix: install cargo-deb / cargo-generate-rpm from source.
 
 * Release CI: prebuilt `cargo-deb` Switched the install step to `cargo install --locked cargo-deb cargo-generate-rpm` to target the right glibc.

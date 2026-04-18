@@ -2,7 +2,7 @@
 # Build a local macOS .app bundle for the host architecture.
 # Produces:
 #   dist/LiteAnvil.app                                 (codesigned ad-hoc, xattrs cleared)
-#   dist/lite-anvil-${VERSION}-macos-${ARCH}.dmg       (release archive)
+#   dist/lite-anvil-${VERSION}-macos-${ARCH}.zip       (release archive)
 #
 # No sudo required. Codesign is ad-hoc (`-`); xattr -cr clears the quarantine bit
 # and any leftover extended attributes that would otherwise trip Gatekeeper locally.
@@ -30,7 +30,7 @@ VERSION="$(awk -F'"' '
 
 DIST_DIR="dist"
 APP="$DIST_DIR/LiteAnvil.app"
-DMG="$DIST_DIR/lite-anvil-${VERSION}-macos-${ARCH_LABEL}.dmg"
+ARCHIVE="$DIST_DIR/lite-anvil-${VERSION}-macos-${ARCH_LABEL}.zip"
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -254,7 +254,7 @@ for bin in "$BINARY" "target/$RUST_TARGET/release/nano-anvil"; do
 done
 
 mkdir -p "$DIST_DIR"
-rm -rf "$APP" "$DMG"
+rm -rf "$APP" "$ARCHIVE"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
 
 cp "$BINARY" "$APP/Contents/MacOS/lite-anvil"
@@ -338,20 +338,8 @@ fi
 
 sign_macos_app "$APP"
 
-DMG_STAGE="$DIST_DIR/.dmg-staging"
-rm -rf "$DMG_STAGE"
-mkdir -p "$DMG_STAGE"
-cp -R "$APP" "$DMG_STAGE/"
-[ -d "$NANO_APP" ] && cp -R "$NANO_APP" "$DMG_STAGE/"
-ln -s /Applications "$DMG_STAGE/Applications"
+cp "$ROOT_DIR/scripts/install-mac.sh" "$DIST_DIR/install-mac.sh"
+(cd "$DIST_DIR" && zip -qry "$(basename "$ARCHIVE")" LiteAnvil.app NanoAnvil.app install-mac.sh)
 
-hdiutil create \
-    -volname "Lite-Anvil ${VERSION}" \
-    -srcfolder "$DMG_STAGE" \
-    -ov -format UDZO \
-    "$DMG" >/dev/null
-
-rm -rf "$DMG_STAGE"
-
-echo "Built archive: $DMG"
+echo "Built archive: $ARCHIVE"
 echo "App bundles:   $APP, $NANO_APP"

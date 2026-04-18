@@ -15,7 +15,9 @@ Release archives contain both the `lite-anvil` (full editor) and `nano-anvil` (m
 
 Pick whichever format matches your distro:
 
-- **Debian / Ubuntu**: download `lite-anvil_*.deb` (and optionally `nano-anvil_*.deb`) and install with:
+The `.deb` and `.rpm` install both `lite-anvil` and `nano-anvil` together.
+
+- **Debian / Ubuntu**: download `lite-anvil_*.deb` and install with:
   ```bash
   sudo apt install ./lite-anvil_*_amd64.deb
   ```
@@ -32,9 +34,15 @@ Pick whichever format matches your distro:
 
 ### macOS
 
-Download `lite-anvil-*-macos-{x86_64,aarch64}.dmg` for your architecture. Double-click the `.dmg`, then drag `LiteAnvil.app` and `NanoAnvil.app` onto the `Applications` shortcut. Launch from Launchpad or Spotlight.
+Download `lite-anvil-*-macos-{x86_64,aarch64}.zip` for your architecture, extract it, and from a Terminal in the extracted folder run:
 
-Because the build is ad-hoc signed (not paid-notarized), Gatekeeper will warn on first launch. Right-click the app and choose *Open* once; subsequent launches go through without prompting.
+```bash
+bash install-mac.sh
+```
+
+This copies `LiteAnvil.app` + `NanoAnvil.app` to `/Applications`, clears the download quarantine bit, and creates `lite-anvil` / `nano-anvil` CLI symlinks in `/usr/local/bin` and `/opt/homebrew/bin`.
+
+Running the script via `bash` is what lets the quarantine clear actually take effect — macOS Sequoia's Gatekeeper no longer honors the right-click → *Open* bypass for unsigned apps, so a double-click install would fail.
 
 ### Windows
 
