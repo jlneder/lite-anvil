@@ -30,19 +30,7 @@ sdl = ["dep:sdl3-sys"]
 #
 # Prerequisite for source builders: cmake + a C compiler (both already
 # required by other deps in most setups).
-sdl3-sys = { version = "0.6.3", features = [
-    "build-from-source-static",
-    "sdl-lean-and-mean",
-    "no-sdl-gpu",
-    "no-sdl-camera",
-    "no-sdl-joystick",
-    "no-sdl-haptic",
-    "no-sdl-hidapi",
-    "no-sdl-sensor",
-    "no-sdl-dialog",
-    "no-sdl-tray",
-    "no-sdl-power",
-], optional = true }
+sdl3-sys = { version = "0.6.3", features = ["use-pkg-config"], optional = true }
 fontdue = "0.9.3"
 freetype = "0.7.2"
 notify = "8.2.0"
