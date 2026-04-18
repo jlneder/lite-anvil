@@ -155,6 +155,28 @@ install_macos() {
         echo "Installed Nano-Anvil ${version:-?} to $nano_app"
     fi
     echo "CLI symlinks: $cli_link, $nano_cli"
+
+    # On stock macOS `/usr/local/bin` is wired into the default PATH via
+    # `/etc/paths`, but Apple Silicon setups where the user has rewritten
+    # PATH (e.g. to prefer Homebrew under `/opt/homebrew/bin`) often drop
+    # it. Detect that and point the user at the fix rather than silently
+    # leaving `lite-anvil` / `nano-anvil` un-runnable from the shell.
+    if [[ ":${PATH}:" != *":/usr/local/bin:"* ]]; then
+        local shell_rc
+        case "${SHELL##*/}" in
+            zsh)  shell_rc="$HOME/.zshrc" ;;
+            bash) shell_rc="$HOME/.bash_profile" ;;
+            fish) shell_rc="$HOME/.config/fish/config.fish" ;;
+            *)    shell_rc="your shell profile" ;;
+        esac
+        echo
+        echo "Note: /usr/local/bin is not in your PATH, so 'lite-anvil'"
+        echo "and 'nano-anvil' won't be runnable directly. Add it to"
+        echo "$shell_rc — for zsh or bash:"
+        echo
+        echo "    export PATH=\"/usr/local/bin:\$PATH\""
+        echo
+    fi
 }
 
 OS="$(uname)"

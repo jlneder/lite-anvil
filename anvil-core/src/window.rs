@@ -140,29 +140,34 @@ pub fn init() -> Result<()> {
     // behaves the same on a Nix / Arch / Fedora source build as on our
     // old hand-crafted "no-GL" tarballs.
     //
-    //  * FRAMEBUFFER_ACCELERATION=0 — the important one. By default on
-    //    Linux, `SDL_GetWindowSurface` silently spins up an SDL_Renderer
-    //    (OpenGL) to present via a texture, which dlopens libGL +
-    //    libGLX_nvidia + libnvidia-glcore + friends and balloons RSS
-    //    from ~18 MB to ~70 MB. Setting this hint tells SDL to use the
-    //    plain X11 SHM framebuffer path with no GL involvement at all.
-    //  * VIDEO_DRIVER=x11,wayland — prefer X11 (which can present via
-    //    MIT-SHM with no GL) on Linux, only falling back to Wayland
-    //    when X11 is absent. Windows and macOS ignore this hint.
+    //  * FRAMEBUFFER_ACCELERATION=0 — the important one on every
+    //    platform. By default `SDL_GetWindowSurface` silently spins up
+    //    an SDL_Renderer (OpenGL/Metal/D3D) to present via a texture,
+    //    which on Linux dlopens libGL + libGLX_nvidia +
+    //    libnvidia-glcore + friends and balloons RSS from ~18 MB to
+    //    ~70 MB. Setting this hint tells SDL to use the plain
+    //    software-framebuffer path instead.
     //  * RENDER_DRIVER=software — belt-and-braces: if anything in the
     //    stack does spin up SDL_Renderer, force the CPU backend.
+    //  * VIDEO_DRIVER=x11,wayland — Linux-only. Pins SDL to X11 (which
+    //    can present via MIT-SHM with no GL) and falls back to Wayland
+    //    if X11 is absent. Setting this on macOS or Windows causes
+    //    `SDL_Init` to error with "x11,wayland not available" because
+    //    neither driver exists there; macOS (cocoa) and Windows
+    //    (windows) use their platform-native drivers unconditionally.
     unsafe {
         SDL_SetHint(
             c"SDL_FRAMEBUFFER_ACCELERATION".as_ptr(),
             c"0".as_ptr(),
         );
         SDL_SetHint(
-            c"SDL_VIDEO_DRIVER".as_ptr(),
-            c"x11,wayland".as_ptr(),
-        );
-        SDL_SetHint(
             c"SDL_RENDER_DRIVER".as_ptr(),
             c"software".as_ptr(),
+        );
+        #[cfg(target_os = "linux")]
+        SDL_SetHint(
+            c"SDL_VIDEO_DRIVER".as_ptr(),
+            c"x11,wayland".as_ptr(),
         );
     }
 

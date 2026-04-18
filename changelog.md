@@ -1,5 +1,20 @@
 # Change Log
 
+## [2.9.2] - 2026-04-17 -- Fix macOS / Windows launch; context-menu clipboard fix; install.sh fix. Find/cursor fixes.
+
+* Fixed `Fatal SDL3 init failed, x11,wayland not available` on launch for macOS (Intel + ARM) and Windows.
+* Context-menu Cut / Copy / Paste fix.
+* Find: match selection no longer hidden behind the find bar — doc view's rect now excludes the bar's height while active.
+* Find: navigating to a match now always vertically centers the view on it.
+* Find bar: Left/Right, Ctrl+Left/Right, Home/End, and Delete now work inside the find and replace inputs.
+* Find bar: click-to-focus.
+  * PCRE2 JIT is enabled (`jit_if_available(true)`), speeds up match-heavy queries.
+  * The compiled regex is cached across keystrokes when the query / flags haven't changed.
+  * A single `CaptureLocations` is reused across every line instead of being allocated per line.
+  * ASCII-only lines skip char-index walking entirely (byte offset == column). Non-ASCII lines walk `char_indices` once per line.
+* PgUp / PgDn now scroll the view by a full page alongside the cursor, so the cursor keeps the same relative row position on screen.
+* `install.sh` on macOS now prints the `export PATH=...` line and matching shell rc (`.zshrc` / `.bash_profile` / fish config) when `/usr/local/bin` isn't in the user's PATH — common on Apple Silicon setups that prefer `/opt/homebrew/bin`.
+
 ## [2.9.1] - 2026-04-17 -- Fix macOS ARM release build.
 
 * Fixed `Undefined symbols for architecture arm64: "___isPlatformVersionAtLeast"` in the Mac ARM release build. (2.9.0 issue).
