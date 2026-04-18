@@ -11,14 +11,25 @@ name = "lite-anvil"
 maintainer = "Lite-Anvil contributors"
 copyright = "MIT"
 extended-description = "A code editor built in Rust with SDL3."
-depends = "libsdl3-0, libfreetype6, libpcre2-8-0"
+depends = "$auto"
 section = "editors"
 priority = "optional"
 assets = [
-    ["target/release/lite-anvil", "usr/bin/", "755"],
-    ["data/**/*",                 "usr/share/lite-anvil/", "644"],
-    ["resources/linux/com.lite_anvil.LiteAnvil.desktop",
-                                  "usr/share/applications/lite-anvil.desktop", "644"],
+    ["target/release/lite-anvil",                            "usr/bin/",                                              "755"],
+    ["../data/**/*",                                         "usr/share/lite-anvil/data/",                            "644"],
+    ["../resources/linux/com.lite_anvil.LiteAnvil.desktop",  "usr/share/applications/lite-anvil.desktop",             "644"],
+    ["../resources/icons/lite-anvil.png",                    "usr/share/icons/hicolor/256x256/apps/lite-anvil.png",   "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "lite-anvil"
+license = "MIT"
+summary = "A code editor built in Rust with SDL3"
+assets = [
+    { source = "target/release/lite-anvil",                           dest = "/usr/bin/lite-anvil",                                  mode = "755" },
+    { source = "../resources/linux/com.lite_anvil.LiteAnvil.desktop", dest = "/usr/share/applications/lite-anvil.desktop",          mode = "644" },
+    { source = "../resources/icons/lite-anvil.png",                   dest = "/usr/share/icons/hicolor/256x256/apps/lite-anvil.png", mode = "644" },
+    { source = "../data/**/*",                                        dest = "/usr/share/lite-anvil/data/",                          mode = "644" },
 ]
 
 [[bin]]

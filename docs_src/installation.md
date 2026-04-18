@@ -13,40 +13,32 @@ Release archives contain both the `lite-anvil` (full editor) and `nano-anvil` (m
 
 ### Linux
 
-Extract the archive, copy the binary and data directory:
+Pick whichever format matches your distro:
 
-```bash
-cp lite-anvil ~/.local/bin/
-cp -r data ~/.local/share/lite-anvil/
-```
-
-Optional -- register for "Open With" on supported file types:
-
-```bash
-cp resources/linux/com.lite_anvil.LiteAnvil.desktop ~/.local/share/applications/
-cp resources/icons/lite-anvil.png ~/.local/share/icons/hicolor/128x128/apps/
-update-desktop-database ~/.local/share/applications/
-```
+- **Debian / Ubuntu**: download `lite-anvil_*.deb` (and optionally `nano-anvil_*.deb`) and install with:
+  ```bash
+  sudo apt install ./lite-anvil_*_amd64.deb
+  ```
+- **Fedora / RHEL / openSUSE**: download `lite-anvil-*.rpm` and install with:
+  ```bash
+  sudo dnf install ./lite-anvil-*.x86_64.rpm
+  ```
+- **Anywhere else (Arch, NixOS, Gentoo, ...)**: download `lite-anvil-*-x86_64.AppImage`, make it executable, and run it:
+  ```bash
+  chmod +x lite-anvil-*-x86_64.AppImage
+  ./lite-anvil-*-x86_64.AppImage
+  ```
+- **Manual / portable**: extract `lite-anvil-*-linux-x86_64.tar.gz` and copy the binary + `data/` directory to wherever you like. Desktop entry + icon are included in `resources/linux/` and `resources/icons/`.
 
 ### macOS
 
-Extract the zip and run the included install script:
+Download `lite-anvil-*-macos-{x86_64,aarch64}.dmg` for your architecture. Double-click the `.dmg`, then drag `LiteAnvil.app` and `NanoAnvil.app` onto the `Applications` shortcut. Launch from Launchpad or Spotlight.
 
-```bash
-./install-mac.sh
-```
-
-This copies LiteAnvil.app and NanoAnvil.app to `/Applications`, clears quarantine, and codesigns both.
+Because the build is ad-hoc signed (not paid-notarized), Gatekeeper will warn on first launch. Right-click the app and choose *Open* once; subsequent launches go through without prompting.
 
 ### Windows
 
-Extract the archive. Copy `lite-anvil.exe` and the `data/` directory wherever you like.
-
-Optional -- register file associations:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File resources\windows\install-file-associations.ps1
-```
+Download `LiteAnvil-*-x86_64-setup.exe` and run it. The installer bundles both `lite-anvil.exe` and `nano-anvil.exe`, creates Start Menu shortcuts, and offers optional file-association and *Add to PATH* tasks. A SmartScreen warning appears the first time (the build is unsigned) — click *More info* → *Run anyway*.
 
 ## Building from Source
 

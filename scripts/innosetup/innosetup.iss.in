@@ -65,27 +65,6 @@ LicenseFile={#SourceDir}/LICENSE
 SetupIconFile={#SourceDir}/resources/icons/icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}, 0
 
-; Get a list of icons for different DPIs
-#define WizardIconPath = SourceDir + "/scripts/innosetup/"
-#define FinalIconPath ""
-#define FindHandle
-#define FindResult
-#for {FindHandle = FindResult = FindFirst(WizardIconPath + "lite-anvil@*.bmp", 0); FindResult; FindResult = FindNext(FindHandle)} \
-  Insert(FinalIconPath, 0, WizardIconPath + FindGetFileName(FindHandle) + ",")
-#if FindHandle
-  #expr FindClose(FindHandle)
-#endif
-WizardSmallImageFile="{#FinalIconPath}"
-
-; Get a list of banners for different DPIs (FIXME: figure out how to reuse this code?)
-#define FinalBannerPath ""
-#for {FindHandle = FindResult = FindFirst(WizardIconPath + "lite-anvil-banner@*.bmp", 0); FindResult; FindResult = FindNext(FindHandle)} \
-  Insert(FinalBannerPath, 0, WizardIconPath + FindGetFileName(FindHandle) + ",")
-#if FindHandle
-  #expr FindClose(FindHandle)
-#endif
-WizardImageFile="{#FinalBannerPath}"
-
 ; Required for the add to path option to refresh environment
 ChangesEnvironment=yes
 
@@ -105,6 +84,7 @@ Source: "{#BuildDir}/lite-anvil/*"; DestDir: "{app}"; Flags: ignoreversion recur
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: not WizardIsTaskSelected('portablemode')
+Name: "{group}\Nano-Anvil"; Filename: "{app}\nano-anvil.exe"; Check: not WizardIsTaskSelected('portablemode')
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"; Check: not WizardIsTaskSelected('portablemode')
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon; Check: not WizardIsTaskSelected('portablemode')
 ; Name: "{usersendto}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

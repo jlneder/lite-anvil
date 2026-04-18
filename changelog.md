@@ -1,5 +1,12 @@
 # Change Log
 
+## [2.9.4] - 2026-04-17 -- Packaging overhaul: Add AppImage + .deb + .rpm on Linux, switch to .dmg on macOS and Inno Setup installer on Windows.
+
+* Linux: release now publishes `.AppImage`, `.deb`, and `.rpm` alongside the existing `.tar.gz`. `.deb` / `.rpm` drop into `/usr/bin` + `/usr/share/{lite,nano}-anvil/data/` and register a `.desktop` entry + 256×256 hicolor icon. AppImage is self-contained and runs on any distro (glibc 2.35+). Built via `cargo-deb`, `cargo-generate-rpm`, and `appimagetool` respectively.
+* macOS: shipped artifact is now a drag-to-install `.dmg` (LiteAnvil.app + NanoAnvil.app + Applications symlink) instead of a `.zip` + `install-mac.sh`. Drops the need for the install script entirely. `scripts/build-local-mac.sh` produces a `.dmg` too.
+* Windows: shipped artifact is now `LiteAnvil-X.Y.Z-x86_64-setup.exe` built with Inno Setup 6 instead of the raw `.zip`. Creates Start Menu shortcuts for both editors, registers the "Open with Lite-Anvil" context menu, and offers optional *Add to PATH* / desktop icon tasks. VC runtime still bundled as a safety net. Icon is auto-generated from the PNG in CI so no `.ico` asset lives in the tree.
+* Runtime: `find_data_dir` now picks `/usr/share/<binary-name>` based on the binary's basename, so `nano-anvil` installed via its own `.deb` / `.rpm` finds `/usr/share/nano-anvil/data/` instead of stepping on `lite-anvil`'s data.
+
 ## [2.9.3] - 2026-04-17 -- macOS blank-window fix; Windows VCRUNTIME140.dll fix; macOS CLI symlink, Find fix.
 
 * Fixed blank window / nothing renders on macOS (Intel + ARM).  (Regression fix).

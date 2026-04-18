@@ -30,7 +30,7 @@ impl RuntimeContext {
             .parent()
             .context("executable has no parent directory")?
             .to_path_buf();
-        let data_dir = find_data_dir(&exe_dir);
+        let data_dir = find_data_dir(&exe_file, &exe_dir);
         let path_sep = std::path::MAIN_SEPARATOR;
         let user_dir = find_user_dir(&exe_dir, path_sep);
         let scale = std::env::var("LITE_SCALE")
@@ -85,21 +85,32 @@ fn apply_appimage_workdir_fix() -> Result<()> {
     Ok(())
 }
 
-fn find_data_dir(exe_dir: &Path) -> PathBuf {
+fn find_data_dir(exe_file: &Path, exe_dir: &Path) -> PathBuf {
     fn is_data_dir(candidate: &Path) -> bool {
         candidate.join("fonts").join("Lilex-Regular.ttf").exists()
     }
 
+    let app_name = match exe_file.file_stem().and_then(OsStr::to_str) {
+        Some("nano-anvil") => "nano-anvil",
+        _ => "lite-anvil",
+    };
+
     if let Some(prefix) = std::env::var_os("LITE_PREFIX") {
-        return PathBuf::from(prefix).join("share").join("lite-anvil");
+        return PathBuf::from(prefix).join("share").join(app_name);
     }
 
     if exe_dir.file_name() == Some(OsStr::new("bin"))
         && let Some(prefix) = exe_dir.parent()
     {
-        let candidate = prefix.join("share").join("lite-anvil");
-        if is_data_dir(&candidate) {
-            return candidate;
+        for name in [app_name, "lite-anvil"] {
+            let candidate = prefix.join("share").join(name).join("data");
+            if is_data_dir(&candidate) {
+                return candidate;
+            }
+            let candidate = prefix.join("share").join(name);
+            if is_data_dir(&candidate) {
+                return candidate;
+            }
         }
     }
 
