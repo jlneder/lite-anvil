@@ -128,6 +128,57 @@ impl TerminalBufferInner {
         &self.screen
     }
 
+    /// Number of rows currently held in scrollback history.
+    pub fn history_len(&self) -> usize {
+        self.history.len()
+    }
+
+    /// Return `rows` rows of cell-grid for rendering, with the bottom of
+    /// the view `scrollback` lines above the current bottom (i.e.
+    /// `scrollback == 0` shows the live screen, larger values reveal
+    /// history). `scrollback` is clamped to `history_len()`. The
+    /// returned vector always has exactly `rows` entries; positions
+    /// before history begins are padded with blank rows, matching how
+    /// most terminals render when you scroll past the top.
+    pub fn visible_rows(
+        &self,
+        rows: usize,
+        scrollback: usize,
+    ) -> Vec<std::borrow::Cow<'_, Vec<Cell>>> {
+        use std::borrow::Cow;
+        let scrollback = scrollback.min(self.history.len());
+        let total_hist = self.history.len();
+        // Top of the visible window within the concatenated (history ++
+        // screen) sequence. `first_idx == total_hist` is the live view.
+        let first_idx = total_hist.saturating_sub(scrollback);
+        let mut out: Vec<Cow<'_, Vec<Cell>>> = Vec::with_capacity(rows);
+        for offset in 0..rows {
+            let i = first_idx + offset;
+            if i < total_hist {
+                out.push(Cow::Borrowed(&self.history[i]));
+            } else {
+                let scr_idx = i - total_hist;
+                if scr_idx < self.screen.len() {
+                    out.push(Cow::Borrowed(&self.screen[scr_idx]));
+                } else {
+                    out.push(Cow::Owned(vec![Cell::blank(self.default_fg); self.cols]));
+                }
+            }
+        }
+        out
+    }
+
+    /// Replace the ANSI palette and default foreground. Subsequent SGR
+    /// color escapes resolve against the new palette; cells already in
+    /// the screen keep their original RGBA.
+    pub fn set_palette(&mut self, palette: [[u8; 4]; 16], default_fg: [u8; 4]) {
+        self.palette = palette;
+        if self.current_fg == Some(self.default_fg) {
+            self.current_fg = Some(default_fg);
+        }
+        self.default_fg = default_fg;
+    }
+
     /// Current cursor row (1-based).
     pub fn cursor_row(&self) -> usize {
         self.cursor_row
@@ -871,6 +922,55 @@ mod tests {
             .iter()
             .map(|c| char::from_u32(c.ch).unwrap_or('?'))
             .collect()
+    }
+
+    fn visible_row_text(
+        b: &TerminalBufferInner,
+        rows: usize,
+        scrollback: usize,
+    ) -> Vec<String> {
+        b.visible_rows(rows, scrollback)
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| char::from_u32(c.ch).unwrap_or('?'))
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn visible_rows_with_no_scrollback_returns_live_screen() {
+        let mut t = buf(6, 3);
+        t.process_output(b"a\r\nb\r\nc");
+        let got = visible_row_text(&t, 3, 0);
+        assert_eq!(got.len(), 3);
+        assert_eq!(&got[0][..1], "a");
+        assert_eq!(&got[1][..1], "b");
+        assert_eq!(&got[2][..1], "c");
+    }
+
+    #[test]
+    fn visible_rows_walks_back_into_history() {
+        let mut t = buf(6, 3);
+        // Pump 6 lines through a 3-row screen so 3 rows end up in history.
+        t.process_output(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix");
+        assert!(t.history_len() >= 3, "history should have scrollback");
+        // scrollback = 3 should scroll the view so the top visible row
+        // is `one` (the oldest scrollback line).
+        let got = visible_row_text(&t, 3, 3);
+        assert_eq!(got.len(), 3);
+        assert_eq!(&got[0][..3], "one");
+    }
+
+    #[test]
+    fn visible_rows_clamps_scrollback_past_history() {
+        let mut t = buf(6, 3);
+        t.process_output(b"x");
+        // Asking for 10 lines of scrollback when there's none must not
+        // panic or return garbage -- it should silently clamp.
+        let got = visible_row_text(&t, 3, 10);
+        assert_eq!(got.len(), 3);
     }
 
     #[test]

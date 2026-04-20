@@ -1,5 +1,18 @@
 # Change Log
 
+## [2.10.1] - 2026-04-19 -- LSP inlay stability; terminal CWD, tabs, colors, and scrollback.
+
+* LSP inlay hints no longer flash away on every keystroke or retry tick; hints are swapped in atomically only when a non-empty response arrives.
+* LSP inlay hints for the active file no longer get clobbered by responses for other open tabs;
+* Terminal opens in the current project directory: after `forkpty(... , cwd)`, the editor writes `cd '<path>' && clear\n` into the pty so rc-file `cd $HOME` can't override it. (Regression fix).
+* Terminal tab bar matches the doc tab bar; click-to-switch, click-x-to-close.
+* Terminal colors derive from the active theme and re-sync every frame; Nord-style muted defaults for ANSI blue/green/red/yellow.
+* Terminal has scrollable scrollback.
+* Terminal row count accounts for the tab bar, so output stays inside the panel instead of drawing below it.
+* Active tab (doc and terminal) uses a 3 px accent underline so it reads cleanly on themes where `background` and `background2` are close.
+* Markdown preview smooth-scroll now snaps to target within half a pixel so the lerp actually terminates.
+* Closing the last terminal forces a window invalidate so the editor reclaims the vacated strip in the same frame.
+
 ## [2.10.0] - 2026-04-19 -- Adding Note Anvil: a markdown note-taking app, new icons, app specific userdirs.
 
 * New `note-anvil` binary: sidebar list of `*.md` notes from `~/local-notes/` (override via `NOTE_ANVIL_DIR`), always-on markdown preview, autosave-on-edit (250 ms debounce), single-note-at-a-time switching, filtered command palette. (From NoteSquirrel).

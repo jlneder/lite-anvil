@@ -29,6 +29,10 @@ pub(crate) struct LspState {
     pub initialized: bool,
     pub diagnostics: HashMap<String, Vec<Diagnostic>>,
     pub pending_requests: HashMap<i64, String>,
+    /// Per-request URI for pending inlayHint requests, so that late
+    /// responses for a non-active file can be discarded instead of
+    /// overwriting the hints currently on screen.
+    pub pending_request_uris: HashMap<i64, String>,
     pub next_request_id: i64,
     pub root_uri: String,
     pub filetype: String,
@@ -36,6 +40,9 @@ pub(crate) struct LspState {
     pub pending_change_uri: Option<String>,
     pub pending_change_version: i64,
     pub inlay_hints: Vec<InlayHint>,
+    /// URI the currently held `inlay_hints` belong to. Used to invalidate
+    /// the list when the user switches to a different file.
+    pub inlay_hints_uri: String,
     pub inlay_retry_at: Option<Instant>,
     pub inlay_retry_count: u32,
 }
@@ -47,6 +54,7 @@ impl LspState {
             initialized: false,
             diagnostics: HashMap::new(),
             pending_requests: HashMap::new(),
+            pending_request_uris: HashMap::new(),
             next_request_id: 1,
             root_uri: String::new(),
             filetype: String::new(),
@@ -54,6 +62,7 @@ impl LspState {
             pending_change_uri: None,
             pending_change_version: 0,
             inlay_hints: Vec::new(),
+            inlay_hints_uri: String::new(),
             inlay_retry_at: None,
             inlay_retry_count: 0,
         }

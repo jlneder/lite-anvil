@@ -2499,6 +2499,9 @@ pub fn run(
                             };
                             if let Some(bytes) = data {
                                 let _ = inst.inner.write(&bytes);
+                                // Snap to live bottom so the caret is visible.
+                                inst.scrollback = 0.0;
+                                inst.scrollback_target = 0.0;
                             }
                         }
                         redraw = true;
@@ -3097,7 +3100,29 @@ pub fn run(
                         {
                             terminal.visible = !terminal.visible;
                             if terminal.visible && terminal.terminals.is_empty() {
-                                let _ = terminal.spawn(&project_root);
+                                let active_doc_path = docs
+                                    .get(active_tab)
+                                    .map(|d| d.path.as_str())
+                                    .unwrap_or("");
+                                let cwd =
+                                    crate::editor::terminal_panel::resolve_terminal_cwd(
+                                        active_doc_path,
+                                        &project_root,
+                                    );
+                                if terminal.spawn(&cwd) {
+                                    let n = terminal.terminals.len();
+                                    let cd_payload =
+                                        crate::editor::terminal_panel::terminal_cd_payload(
+                                            &cwd,
+                                        );
+                                    if let Some(t) = terminal.active_terminal() {
+                                        t.title =
+                                            crate::editor::terminal_panel::terminal_title(
+                                                n, &cwd,
+                                            );
+                                        let _ = t.inner.write(cd_payload.as_bytes());
+                                    }
+                                }
                             }
                             terminal.focused = terminal.visible;
                             redraw = true;
@@ -3106,12 +3131,28 @@ pub fn run(
 
                         // Direct Ctrl+Shift+T for new terminal.
                         if mods.ctrl && mods.shift && !mods.alt && key == "t" {
-                            let ok = terminal.spawn(&project_root);
+                            let active_doc_path = docs
+                                .get(active_tab)
+                                .map(|d| d.path.as_str())
+                                .unwrap_or("");
+                            let cwd = crate::editor::terminal_panel::resolve_terminal_cwd(
+                                active_doc_path,
+                                &project_root,
+                            );
+                            let ok = terminal.spawn(&cwd);
                             if ok {
-                                log_to_file(
-                                    userdir,
-                                    &format!("New terminal {} spawned", terminal.terminals.len()),
-                                );
+                                let n = terminal.terminals.len();
+                                let cd_payload =
+                                    crate::editor::terminal_panel::terminal_cd_payload(
+                                        &cwd,
+                                    );
+                                if let Some(t) = terminal.active_terminal() {
+                                    t.title =
+                                        crate::editor::terminal_panel::terminal_title(
+                                            n, &cwd,
+                                        );
+                                    let _ = t.inner.write(cd_payload.as_bytes());
+                                }
                             }
                             redraw = true;
                             continue;
@@ -3151,6 +3192,8 @@ pub fn run(
                     if subsystems.has_terminal() && terminal.visible && terminal.focused {
                         if let Some(inst) = terminal.active_terminal() {
                             let _ = inst.inner.write(text.as_bytes());
+                            inst.scrollback = 0.0;
+                            inst.scrollback_target = 0.0;
                         }
                         redraw = true;
                         continue;
@@ -3366,7 +3409,6 @@ pub fn run(
                         if subsystems.has_lsp() {
                             // Mark LSP change for debounced didChange (only for LSP-handled files).
                             if lsp_state.transport_id.is_some() && lsp_state.initialized {
-                                lsp_state.inlay_hints.clear();
                                 if let Some(doc) = docs.get(active_tab) {
                                     let ext = doc.path.rsplit('.').next().unwrap_or("");
                                     if !doc.path.is_empty() && ext_to_lsp_filetype(ext).is_some() {
@@ -3770,15 +3812,70 @@ pub fn run(
                         redraw = true;
                         continue;
                     }
-                    // Terminal click: focus the terminal panel.
+                    // Terminal click: focus the terminal panel, handle tab/close clicks.
                     if terminal.visible {
                         let (ww, wh, _, _) = crate::window::get_window_size();
+                        let win_w = ww as f64;
                         let win_h = wh as f64;
                         let status_h_click = style.font_height + style.padding_y * 2.0;
                         let terminal_h_click = (win_h * 0.3)
                             .min(win_h - tab_h - status_h_click - 50.0)
                             .max(80.0);
                         let term_y_click = win_h - terminal_h_click - status_h_click;
+                        let sidebar_w_click = if subsystems.has_sidebar() && sidebar_visible {
+                            sidebar_width
+                        } else {
+                            0.0
+                        };
+                        let term_x_click = sidebar_w_click;
+                        let term_w_click = win_w - sidebar_w_click;
+                        let tab_bar_h_click = if !terminal.terminals.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let tab_bar_y = term_y_click + style.divider_size;
+
+                        // Tab bar click (switch / close).
+                        if tab_bar_h_click > 0.0
+                            && *y >= tab_bar_y
+                            && *y < tab_bar_y + tab_bar_h_click
+                            && *x >= term_x_click
+                            && *x < term_x_click + term_w_click
+                        {
+                            use crate::editor::view::DrawContext as _;
+                            let close_w =
+                                draw_ctx.font_width(style.icon_font, "C") + style.padding_x;
+                            let mut tx = term_x_click;
+                            let mut handled = false;
+                            let n = terminal.terminals.len();
+                            for i in 0..n {
+                                let label_w = draw_ctx
+                                    .font_width(style.font, &terminal.terminals[i].title);
+                                let tw = label_w + style.padding_x * 2.0 + close_w;
+                                let close_x = tx + tw - close_w;
+                                if *x >= close_x && *x < close_x + close_w {
+                                    // Close this terminal.
+                                    terminal.active = i;
+                                    terminal.close_active();
+                                    crate::window::force_invalidate();
+                                    handled = true;
+                                    break;
+                                }
+                                if *x >= tx && *x < tx + tw {
+                                    terminal.active = i;
+                                    terminal.focused = true;
+                                    handled = true;
+                                    break;
+                                }
+                                tx += tw + style.divider_size;
+                            }
+                            if handled {
+                                redraw = true;
+                                continue;
+                            }
+                        }
+
                         if *y >= term_y_click && *y < win_h - status_h_click {
                             terminal.focused = true;
                             redraw = true;
@@ -4080,6 +4177,33 @@ pub fn run(
                 EditorEvent::MouseWheel { y, .. } => {
                     let line_h = style.code_font_height * 1.2;
                     let scroll_amt = y * line_h * 3.0;
+                    // Wheel routes to the terminal panel when the cursor is over it.
+                    let over_terminal = subsystems.has_terminal() && terminal.visible && {
+                        let (_, wh, _, _) = crate::window::get_window_size();
+                        let win_h = wh as f64;
+                        let status_h_c = style.font_height + style.padding_y * 2.0;
+                        let tab_h_c = if !single_file_mode && !docs.is_empty() {
+                            style.font_height + style.padding_y * 3.0
+                        } else {
+                            0.0
+                        };
+                        let terminal_h_c = (win_h * 0.3)
+                            .min(win_h - tab_h_c - status_h_c - 50.0)
+                            .max(80.0);
+                        let term_y_c = win_h - terminal_h_c - status_h_c;
+                        mouse_y >= term_y_c && mouse_y < win_h - status_h_c
+                    };
+                    if over_terminal {
+                        if let Some(inst) = terminal.terminals.get_mut(terminal.active) {
+                            // Positive wheel y walks up into history.
+                            let delta = *y * 3.0;
+                            let cap = inst.tbuf.history_len() as f64;
+                            inst.scrollback_target =
+                                (inst.scrollback_target + delta).clamp(0.0, cap);
+                        }
+                        redraw = true;
+                        continue;
+                    }
                     if subsystems.has_sidebar() && sidebar_visible && mouse_x < sidebar_width {
                         // Mouse is over the sidebar -- scroll sidebar only.
                         sidebar_scroll = (sidebar_scroll - scroll_amt).max(0.0);
@@ -4181,30 +4305,90 @@ pub fn run(
         // LSP: poll transport and handle responses.
         if subsystems.has_lsp() {
             if let Some(tid) = lsp_state.transport_id {
-                // Check inlay hint retry timer.
+                // Request fresh inlay hints whenever the active file
+                // changes identity from what `inlay_hints_uri` records.
+                if lsp_state.initialized {
+                    if let Some(doc) = docs.get(active_tab) {
+                        if !doc.path.is_empty() {
+                            let ext = doc.path.rsplit('.').next().unwrap_or("");
+                            let is_lsp_file = ext_to_lsp_filetype(ext)
+                                .map(|ft| ft == lsp_state.filetype)
+                                .unwrap_or(false);
+                            if is_lsp_file {
+                                let uri = path_to_uri(&doc.path);
+                                let already_pending = lsp_state
+                                    .pending_request_uris
+                                    .values()
+                                    .any(|u| u == &uri);
+                                if lsp_state.inlay_hints_uri != uri && !already_pending
+                                {
+                                    let line_count = doc
+                                        .view
+                                        .buffer_id
+                                        .and_then(|id| {
+                                            buffer::with_buffer(id, |b| Ok(b.lines.len()))
+                                                .ok()
+                                        })
+                                        .unwrap_or(100);
+                                    let req_id = lsp_state.next_id();
+                                    lsp_state.pending_requests.insert(
+                                        req_id,
+                                        "textDocument/inlayHint".to_string(),
+                                    );
+                                    lsp_state
+                                        .pending_request_uris
+                                        .insert(req_id, uri.clone());
+                                    let _ = lsp::send_message(
+                                        tid,
+                                        &lsp_inlay_hint_request(
+                                            req_id,
+                                            &uri,
+                                            0,
+                                            line_count,
+                                        ),
+                                    );
+                                    lsp_state.inlay_hints.clear();
+                                    lsp_state.inlay_hints_uri = String::new();
+                                    for d in &mut docs {
+                                        d.cached_change_id = -1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Retry timer for inlay hints while the server is still indexing.
                 if let Some(retry_at) = lsp_state.inlay_retry_at {
                     if Instant::now() >= retry_at {
                         lsp_state.inlay_retry_at = None;
-                        lsp_state.inlay_hints.clear();
-                        for doc in &docs {
+                        if let Some(doc) = docs.get(active_tab) {
                             if !doc.path.is_empty() {
-                                let uri = path_to_uri(&doc.path);
-                                let line_count = doc
-                                    .view
-                                    .buffer_id
-                                    .and_then(|id| {
-                                        buffer::with_buffer(id, |b| Ok(b.lines.len())).ok()
-                                    })
-                                    .unwrap_or(100);
-                                let req_id = lsp_state.next_request_id;
-                                lsp_state.next_request_id += 1;
-                                lsp_state
-                                    .pending_requests
-                                    .insert(req_id, "textDocument/inlayHint".to_string());
-                                let _ = lsp::send_message(
-                                    tid,
-                                    &lsp_inlay_hint_request(req_id, &uri, 0, line_count),
-                                );
+                                let ext = doc.path.rsplit('.').next().unwrap_or("");
+                                let is_lsp_file = ext_to_lsp_filetype(ext)
+                                    .map(|ft| ft == lsp_state.filetype)
+                                    .unwrap_or(false);
+                                if is_lsp_file {
+                                    let uri = path_to_uri(&doc.path);
+                                    let line_count = doc
+                                        .view
+                                        .buffer_id
+                                        .and_then(|id| {
+                                            buffer::with_buffer(id, |b| Ok(b.lines.len())).ok()
+                                        })
+                                        .unwrap_or(100);
+                                    let req_id = lsp_state.next_request_id;
+                                    lsp_state.next_request_id += 1;
+                                    lsp_state
+                                        .pending_requests
+                                        .insert(req_id, "textDocument/inlayHint".to_string());
+                                    lsp_state
+                                        .pending_request_uris
+                                        .insert(req_id, uri.clone());
+                                    let _ = lsp::send_message(
+                                        tid,
+                                        &lsp_inlay_hint_request(req_id, &uri, 0, line_count),
+                                    );
+                                }
                             }
                         }
                     }
@@ -4269,6 +4453,9 @@ pub fn run(
                                         lsp_state
                                             .pending_requests
                                             .insert(req_id, "textDocument/inlayHint".to_string());
+                                        lsp_state
+                                            .pending_request_uris
+                                            .insert(req_id, uri.clone());
                                         let _ = lsp::send_message(
                                             tid,
                                             &lsp_inlay_hint_request(req_id, &uri, 0, line_count),
@@ -4277,16 +4464,25 @@ pub fn run(
                                 }
                             }
 
-                            // Handle inlay hint response.
                             if lsp_state.pending_requests.get(&id).map(|s| s.as_str())
                                 == Some("textDocument/inlayHint")
                             {
                                 lsp_state.pending_requests.remove(&id);
-                                if msg.get("error").is_some() {
-                                    // Silently ignore LSP errors for inlay hints.
+                                let req_uri = lsp_state
+                                    .pending_request_uris
+                                    .remove(&id)
+                                    .unwrap_or_default();
+                                let active_uri = docs
+                                    .get(active_tab)
+                                    .filter(|d| !d.path.is_empty())
+                                    .map(|d| path_to_uri(&d.path))
+                                    .unwrap_or_default();
+                                if !req_uri.is_empty() && req_uri != active_uri {
+                                    continue;
                                 }
                                 if let Some(result) = msg.get("result").and_then(|r| r.as_array()) {
-                                    lsp_state.inlay_hints.clear();
+                                    let mut new_hints: Vec<InlayHint> =
+                                        Vec::with_capacity(result.len());
                                     for hint in result {
                                         let line = hint
                                             .get("position")
@@ -4332,33 +4528,38 @@ pub fn run(
                                         if padding_right {
                                             display = format!("{display} ");
                                         }
-                                        lsp_state.inlay_hints.push(InlayHint {
+                                        new_hints.push(InlayHint {
                                             line,
                                             col,
                                             label: display,
                                         });
                                     }
-                                    // If 0 hints, server may still be loading (rust-analyzer
-                                    // can take 30+ seconds to index). Retry every 2 seconds
-                                    // for up to 40 seconds.
-                                    if lsp_state.inlay_hints.is_empty()
-                                        && lsp_state.inlay_retry_count < 20
-                                    {
-                                        lsp_state.inlay_retry_at = Some(
-                                            Instant::now() + std::time::Duration::from_secs(2),
-                                        );
-                                        lsp_state.inlay_retry_count += 1;
-                                    }
-                                    if !lsp_state.inlay_hints.is_empty() {
-                                        // Discard any pending render cache -- it was built
-                                        // WITHOUT these hints and would poison the cache
-                                        // with the wrong hint count.
-                                        pending_render_cache = None;
-                                        // Invalidate all docs so hints are re-baked.
-                                        for d in &mut docs {
-                                            d.cached_change_id = -1;
+                                    let old_count = lsp_state.inlay_hints.len();
+                                    let new_count = new_hints.len();
+                                    if new_hints.is_empty() {
+                                        if lsp_state.inlay_retry_count < 20 {
+                                            lsp_state.inlay_retry_at = Some(
+                                                Instant::now()
+                                                    + std::time::Duration::from_secs(2),
+                                            );
+                                            lsp_state.inlay_retry_count += 1;
                                         }
-                                        crate::window::force_invalidate();
+                                    } else {
+                                        let uri_changed =
+                                            lsp_state.inlay_hints_uri != req_uri;
+                                        let changed =
+                                            uri_changed || old_count != new_count;
+                                        lsp_state.inlay_hints = new_hints;
+                                        lsp_state.inlay_hints_uri = req_uri.clone();
+                                        lsp_state.inlay_retry_count = 0;
+                                        lsp_state.inlay_retry_at = None;
+                                        if changed {
+                                            pending_render_cache = None;
+                                            for d in &mut docs {
+                                                d.cached_change_id = -1;
+                                            }
+                                            crate::window::force_invalidate();
+                                        }
                                     }
                                     redraw = true;
                                 }
@@ -4683,6 +4884,9 @@ pub fn run(
                                         lsp_state
                                             .pending_requests
                                             .insert(req_id, "textDocument/inlayHint".to_string());
+                                        lsp_state
+                                            .pending_request_uris
+                                            .insert(req_id, uri.clone());
                                         let _ = lsp::send_message(
                                             tid,
                                             &lsp_inlay_hint_request(req_id, &uri, 0, line_count),
@@ -4722,6 +4926,10 @@ pub fn run(
                     terminal.visible = false;
                     terminal.focused = false;
                     terminal.active = 0;
+                    // Panel just went away -- force a native repaint so the
+                    // editor content reclaims the vacated strip in the
+                    // same frame instead of waiting for the next event.
+                    crate::window::force_invalidate();
                 } else if terminal.active >= terminal.terminals.len() {
                     terminal.active = terminal.terminals.len() - 1;
                 }
@@ -5161,7 +5369,7 @@ pub fn run(
                 // Draw tab bar (hidden in single-file mode).
                 let _tab_bar_h = if !single_file_mode && !docs.is_empty() {
                     let tbh = style.font_height + style.padding_y * 3.0;
-                    let accent_h = 2.0;
+                    let accent_h = 3.0;
                     use crate::editor::view::DrawContext as _;
                     draw_ctx.draw_rect(
                         sidebar_w,
@@ -5508,8 +5716,21 @@ pub fn run(
                         let is_lsp_file = ext_to_lsp_filetype(ext)
                             .map(|ft| ft == lsp_state.filetype)
                             .unwrap_or(false);
+                        let active_uri = if doc.path.is_empty() {
+                            String::new()
+                        } else {
+                            path_to_uri(&doc.path)
+                        };
                         let empty_hints = Vec::new();
-                        let hints = if subsystems.has_lsp() && is_lsp_file {
+                        // Only use held hints if they belong to the active file.
+                        // After a tab-switch the cached `inlay_hints` still
+                        // contain entries from the previous file; rendering
+                        // them here would show ghost hints at mismatched line
+                        // numbers until the new file's response arrives.
+                        let hints = if subsystems.has_lsp()
+                            && is_lsp_file
+                            && lsp_state.inlay_hints_uri == active_uri
+                        {
                             &lsp_state.inlay_hints
                         } else {
                             &empty_hints
@@ -5861,9 +6082,20 @@ pub fn run(
                             }
                             let rect = doc.preview.rect;
                             // Smooth-scroll toward the target, clamped to
-                            // [0, max_scroll].
-                            doc.preview.scroll_y +=
-                                (doc.preview.target_scroll_y - doc.preview.scroll_y) * 0.25;
+                            // [0, max_scroll]. Snap to the target once the
+                            // remaining delta is under half a pixel so the
+                            // lerp actually terminates -- otherwise every
+                            // redraw advances scroll_y by an infinitesimal
+                            // fraction and forces the viewport to keep
+                            // shifting by one pixel whenever a repaint
+                            // fires for unrelated reasons.
+                            let diff =
+                                doc.preview.target_scroll_y - doc.preview.scroll_y;
+                            if diff.abs() < 0.5 {
+                                doc.preview.scroll_y = doc.preview.target_scroll_y;
+                            } else {
+                                doc.preview.scroll_y += diff * 0.25;
+                            }
                             let max_scroll =
                                 (doc.preview.content_height - rect.h).max(0.0);
                             if doc.preview.target_scroll_y > max_scroll {
@@ -5903,6 +6135,10 @@ pub fn run(
                 // Draw terminal panel.
                 if subsystems.has_terminal() && terminal.visible {
                     use crate::editor::view::DrawContext as _;
+                    // Keep the terminal palette in sync with the live theme.
+                    let (term_palette, term_default_fg) =
+                        crate::editor::terminal_panel::theme_terminal_palette(&style);
+                    terminal.set_palette(term_palette, term_default_fg);
                     let term_y = height - terminal_h - status_h;
                     let term_x = sidebar_w;
                     let term_w = width - sidebar_w;
@@ -5914,13 +6150,12 @@ pub fn run(
                         style.divider_size,
                         style.divider.to_array(),
                     );
-                    // Background.
                     draw_ctx.draw_rect(
                         term_x,
                         term_y + style.divider_size,
                         term_w,
                         terminal_h - style.divider_size,
-                        [30, 30, 30, 255],
+                        style.background.to_array(),
                     );
                     // Focus indicator.
                     if terminal.focused {
@@ -5933,53 +6168,175 @@ pub fn run(
                         );
                     }
                     // Resize terminal buffer to match panel dimensions.
+                    let tab_bar_h_for_resize = if !terminal.terminals.is_empty() {
+                        style.font_height + style.padding_y * 3.0
+                    } else {
+                        0.0
+                    };
                     let char_h_resize = style.code_font_height * 1.2;
                     let char_w_resize = draw_ctx.font_width(style.code_font, "m");
                     if char_w_resize > 0.0 && char_h_resize > 0.0 {
+                        let avail_h = terminal_h
+                            - style.divider_size
+                            - tab_bar_h_for_resize
+                            - style.padding_y * 2.0;
                         let new_cols =
                             ((term_w - style.padding_x * 2.0) / char_w_resize).max(1.0) as usize;
-                        let new_rows = ((terminal_h - style.divider_size - style.padding_y)
-                            / char_h_resize)
-                            .max(1.0) as usize;
+                        let new_rows = (avail_h / char_h_resize).max(1.0) as usize;
                         if let Some(inst) = terminal.terminals.get_mut(terminal.active) {
                             inst.tbuf.resize(new_cols, new_rows);
                         }
                     }
-                    // Draw terminal tab bar when multiple terminals exist.
-                    let tab_bar_h = if terminal.terminals.len() > 1 {
-                        let tbh = style.font_height + style.padding_y;
+                    // Draw terminal title/tab bar using the same layout as the doc tab bar.
+                    let tab_bar_h = if !terminal.terminals.is_empty() {
+                        let tbh = style.font_height + style.padding_y * 3.0;
+                        let accent_h = 3.0;
                         let tby = term_y + style.divider_size;
-                        draw_ctx.draw_rect(term_x, tby, term_w, tbh, [40, 40, 40, 255]);
-                        let mut tx = term_x + style.padding_x;
+                        draw_ctx.draw_rect(
+                            term_x,
+                            tby,
+                            term_w,
+                            tbh,
+                            style.background2.to_array(),
+                        );
+                        let close_w = draw_ctx.font_width(style.icon_font, "C")
+                            + style.padding_x;
+                        let mut tx = term_x;
                         for (i, inst) in terminal.terminals.iter().enumerate() {
                             let label = &inst.title;
-                            let lw = draw_ctx.font_width(style.font, label) + style.padding_x * 2.0;
-                            let color = if i == terminal.active {
-                                style.accent.to_array()
+                            let label_w = draw_ctx.font_width(style.font, label);
+                            let tw = label_w + style.padding_x * 2.0 + close_w;
+                            let bg = if i == terminal.active {
+                                style.background.to_array()
                             } else {
-                                [80, 80, 80, 255]
+                                style.background2.to_array()
                             };
-                            draw_ctx.draw_rect(tx, tby, lw, tbh, color);
+                            let fg = if i == terminal.active {
+                                style.text.to_array()
+                            } else {
+                                style.dim.to_array()
+                            };
+                            draw_ctx.draw_rect(
+                                tx,
+                                tby + accent_h,
+                                tw,
+                                tbh - accent_h,
+                                bg,
+                            );
+                            if i == terminal.active {
+                                draw_ctx.draw_rect(
+                                    tx,
+                                    tby,
+                                    tw,
+                                    accent_h,
+                                    style.accent.to_array(),
+                                );
+                            }
+                            let text_y = tby
+                                + accent_h
+                                + (tbh - accent_h - style.font_height) / 2.0;
                             draw_ctx.draw_text(
                                 style.font,
                                 label,
                                 tx + style.padding_x,
-                                tby + style.padding_y * 0.5,
-                                style.text.to_array(),
+                                text_y,
+                                fg,
                             );
-                            tx += lw + 2.0;
+                            let close_x = tx + tw - close_w;
+                            let close_hovered = mouse_y >= tby
+                                && mouse_y < tby + tbh
+                                && mouse_x >= close_x
+                                && mouse_x < close_x + close_w;
+                            if close_hovered {
+                                draw_ctx.draw_rect(
+                                    close_x,
+                                    tby + accent_h,
+                                    close_w,
+                                    tbh - accent_h,
+                                    style.line_highlight.to_array(),
+                                );
+                            }
+                            let close_color = if close_hovered {
+                                style.text.to_array()
+                            } else {
+                                style.dim.to_array()
+                            };
+                            draw_ctx.draw_text(
+                                style.icon_font,
+                                "C",
+                                close_x + style.padding_x * 0.5,
+                                tby
+                                    + accent_h
+                                    + (tbh
+                                        - accent_h
+                                        - draw_ctx.font_height(style.icon_font))
+                                        / 2.0,
+                                close_color,
+                            );
+                            draw_ctx.draw_rect(
+                                tx + tw,
+                                tby + style.padding_y * 0.5,
+                                style.divider_size,
+                                tbh - style.padding_y,
+                                style.dim.to_array(),
+                            );
+                            tx += tw + style.divider_size;
                         }
+                        draw_ctx.draw_rect(
+                            term_x,
+                            tby + tbh - style.divider_size,
+                            term_w,
+                            style.divider_size,
+                            style.divider.to_array(),
+                        );
                         tbh
                     } else {
                         0.0
                     };
                     // Draw active terminal buffer text using TerminalBufferInner cell grid.
-                    if let Some(inst) = terminal.terminals.get(terminal.active) {
+                    if let Some(inst) = terminal.terminals.get_mut(terminal.active) {
                         let char_h = style.code_font_height * 1.2;
                         let char_w = draw_ctx.font_width(style.code_font, "m");
                         let ty_start = term_y + style.divider_size + tab_bar_h + 2.0;
+                        let visible_h =
+                            (term_y + terminal_h - ty_start - style.padding_y).max(0.0);
+                        let rows_visible =
+                            (visible_h / char_h).floor().max(1.0) as usize;
 
-                        for (row_idx, row) in inst.tbuf.screen().iter().enumerate() {
+                        let cap = inst.tbuf.history_len() as f64;
+                        inst.scrollback_target =
+                            inst.scrollback_target.clamp(0.0, cap);
+                        let diff = inst.scrollback_target - inst.scrollback;
+                        if diff.abs() >= 0.5 {
+                            inst.scrollback += diff * 0.35;
+                            crate::window::force_invalidate();
+                        } else if inst.scrollback != inst.scrollback_target {
+                            inst.scrollback = inst.scrollback_target;
+                        }
+                        let scrollback_rows = inst
+                            .scrollback
+                            .round()
+                            .max(0.0)
+                            .min(cap) as usize;
+                        let rows_data =
+                            inst.tbuf.visible_rows(rows_visible, scrollback_rows);
+
+                        let cur_row_1 = inst.tbuf.cursor_row();
+                        let cur_col_1 = inst.tbuf.cursor_col();
+                        let cur_visible_row = if scrollback_rows == 0 {
+                            Some(cur_row_1.saturating_sub(1))
+                        } else if scrollback_rows < rows_visible {
+                            Some(
+                                rows_visible
+                                    - scrollback_rows
+                                    + cur_row_1.saturating_sub(1),
+                            )
+                            .filter(|r| *r < rows_visible)
+                        } else {
+                            None
+                        };
+
+                        for (row_idx, row) in rows_data.iter().enumerate() {
                             let ry = ty_start + row_idx as f64 * char_h;
                             if ry + char_h < term_y || ry > term_y + terminal_h {
                                 continue;
@@ -6022,12 +6379,17 @@ pub fn run(
                                 }
                                 run_text.push(ch);
 
-                                // Draw cursor block.
                                 if terminal.focused
-                                    && row_idx == inst.tbuf.cursor_row().saturating_sub(1)
-                                    && col_idx == inst.tbuf.cursor_col().saturating_sub(1)
+                                    && Some(row_idx) == cur_visible_row
+                                    && col_idx == cur_col_1.saturating_sub(1)
                                 {
-                                    draw_ctx.draw_rect(cx, ry, char_w, char_h, [200, 200, 200, 80]);
+                                    draw_ctx.draw_rect(
+                                        cx,
+                                        ry,
+                                        char_w,
+                                        char_h,
+                                        [200, 200, 200, 80],
+                                    );
                                 }
                                 cx += char_w;
                             }
@@ -6035,6 +6397,35 @@ pub fn run(
                             if !run_text.is_empty() {
                                 draw_ctx.draw_text(style.code_font, &run_text, run_x, ry, run_fg);
                             }
+                        }
+
+                        // Scrollbar (shown only when there is history).
+                        if cap > 0.0 {
+                            let sb_w = style.scrollbar_size.max(6.0);
+                            let sb_x = term_x + term_w - sb_w;
+                            let sb_y = ty_start;
+                            let sb_h = char_h * rows_visible as f64;
+                            draw_ctx.draw_rect(
+                                sb_x,
+                                sb_y,
+                                sb_w,
+                                sb_h,
+                                style.scrollbar_track.to_array(),
+                            );
+                            let total = cap + rows_visible as f64;
+                            let ratio = (rows_visible as f64 / total).clamp(0.05, 1.0);
+                            let thumb_h = (sb_h * ratio).max(20.0).min(sb_h);
+                            // scrollback = 0 -> thumb at bottom of track
+                            // scrollback = cap -> thumb at top.
+                            let pos_from_top = (cap - inst.scrollback) / cap;
+                            let thumb_y = sb_y + pos_from_top * (sb_h - thumb_h);
+                            draw_ctx.draw_rect(
+                                sb_x,
+                                thumb_y,
+                                sb_w,
+                                thumb_h,
+                                style.scrollbar.to_array(),
+                            );
                         }
                     }
                 }

@@ -203,22 +203,50 @@ match cmd.as_str() {
     if subsystems.has_terminal() {
         terminal.visible = !terminal.visible;
         if terminal.visible && terminal.terminals.is_empty() {
-            terminal.spawn(&project_root);
-            log_to_file(userdir, "Terminal spawned via toggle");
+            let active_doc_path =
+                docs.get(active_tab).map(|d| d.path.as_str()).unwrap_or("");
+            let cwd = crate::editor::terminal_panel::resolve_terminal_cwd(
+                active_doc_path,
+                &project_root,
+            );
+            if terminal.spawn(&cwd) {
+                let n = terminal.terminals.len();
+                let cd_payload =
+                    crate::editor::terminal_panel::terminal_cd_payload(&cwd);
+                if let Some(t) = terminal.active_terminal() {
+                    t.title = crate::editor::terminal_panel::terminal_title(n, &cwd);
+                    let _ = t.inner.write(cd_payload.as_bytes());
+                }
+                log_to_file(userdir, "Terminal spawned via toggle");
+            }
         }
         terminal.focused = terminal.visible;
     }
 }
 "core:new-terminal" => {
     if subsystems.has_terminal() {
-        if terminal.spawn(&project_root) {
-            log_to_file(userdir, &format!("New terminal {} spawned", terminal.terminals.len()));
+        let active_doc_path =
+            docs.get(active_tab).map(|d| d.path.as_str()).unwrap_or("");
+        let cwd = crate::editor::terminal_panel::resolve_terminal_cwd(
+            active_doc_path,
+            &project_root,
+        );
+        if terminal.spawn(&cwd) {
+            let n = terminal.terminals.len();
+            let cd_payload =
+                crate::editor::terminal_panel::terminal_cd_payload(&cwd);
+            if let Some(t) = terminal.active_terminal() {
+                t.title = crate::editor::terminal_panel::terminal_title(n, &cwd);
+                let _ = t.inner.write(cd_payload.as_bytes());
+            }
+            log_to_file(userdir, &format!("New terminal {n} spawned"));
         }
     }
 }
 "core:close-terminal" => {
     if subsystems.has_terminal() {
         terminal.close_active();
+        crate::window::force_invalidate();
     }
 }
 "core:toggle-minimap" => {
