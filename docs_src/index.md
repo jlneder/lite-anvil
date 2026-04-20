@@ -142,7 +142,7 @@ A minimal single-file editor with software rendering. No GPU driver overhead -- 
 
 ### Note Anvil
 
-A markdown note-taking app with a side-by-side preview. Same software-rendering footprint as Nano Anvil, tuned for quick capture and Zettelkasten-style notes.
+A markdown note-taking app with a side-by-side preview. Same software-rendering footprint as Nano Anvil, for notes and todo lists.
 
 </div>
 
