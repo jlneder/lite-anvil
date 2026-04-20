@@ -134,8 +134,6 @@ External edits are picked up automatically, even across atomic save-by-rename pa
 
 A minimal single-file editor with software rendering. No GPU driver overhead -- ~28MB RAM on Linux. No sidebar, terminal, LSP, git, or tabs.
 
-<img src="assets/nano_screenshot.png" alt="Nano Anvil screenshot" class="screenshot">
-
 </div>
 
 <div class="feature-card" markdown>
@@ -145,8 +143,6 @@ A minimal single-file editor with software rendering. No GPU driver overhead -- 
 ### Note Anvil
 
 A markdown note-taking app with a side-by-side preview. Same software-rendering footprint as Nano Anvil, tuned for quick capture and Zettelkasten-style notes.
-
-<img src="assets/notes_screenshot.png" alt="Note Anvil screenshot" class="screenshot">
 
 </div>
 
