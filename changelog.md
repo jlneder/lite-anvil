@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.10.2] - 2026-04-19 -- Windows build fix.
+
+* Fixed Windows build: `TerminalPanel::set_palette` and the `pending_palette` / `pending_default_fg` fields were only added to the Unix impl.
+
 ## [2.10.1] - 2026-04-19 -- LSP inlay stability; terminal CWD, tabs, colors, and scrollback.
 
 * LSP inlay hints no longer flash away on every keystroke or retry tick; hints are swapped in atomically only when a non-empty response arrives.

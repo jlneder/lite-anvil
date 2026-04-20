@@ -71,6 +71,8 @@ mod dummy {
             false
         }
 
+        pub fn set_palette(&mut self, _palette: [[u8; 4]; 16], _default_fg: [u8; 4]) {}
+
         pub fn close_active(&mut self) -> bool {
             false
         }
@@ -554,6 +556,8 @@ mod windows_impl {
         pub(crate) active: usize,
         pub(crate) visible: bool,
         pub(crate) focused: bool,
+        pub(crate) pending_palette: Option<[[u8; 4]; 16]>,
+        pub(crate) pending_default_fg: Option<[u8; 4]>,
     }
 
     impl TerminalPanel {
@@ -563,7 +567,23 @@ mod windows_impl {
                 active: 0,
                 visible: false,
                 focused: false,
+                pending_palette: None,
+                pending_default_fg: None,
             }
+        }
+
+        /// Apply an ANSI palette to every terminal instance and store it
+        /// as the default for future spawns.
+        pub(crate) fn set_palette(
+            &mut self,
+            palette: [[u8; 4]; 16],
+            default_fg: [u8; 4],
+        ) {
+            for inst in self.terminals.iter_mut() {
+                inst.tbuf.set_palette(palette, default_fg);
+            }
+            self.pending_palette = Some(palette);
+            self.pending_default_fg = Some(default_fg);
         }
 
         /// Spawn a new terminal instance. Returns false if at the limit.
@@ -583,8 +603,11 @@ mod windows_impl {
                 Ok(inner) => {
                     let idx = self.terminals.len();
                     let title = format!("Terminal {}", idx + 1);
-                    let palette = default_16_color_palette();
-                    let default_fg = [200, 200, 200, 255];
+                    let palette = self
+                        .pending_palette
+                        .unwrap_or_else(default_16_color_palette);
+                    let default_fg =
+                        self.pending_default_fg.unwrap_or([200, 200, 200, 255]);
                     let tbuf =
                         TerminalBufferInner::new(80, 24, DEFAULT_SCROLLBACK, palette, default_fg);
                     let inst = TerminalInstance {
