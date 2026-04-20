@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.11.2] - 2026-04-20 -- macOS CI fix: `unsafe extern` block for edition 2024.
+
+* Fixed macOS CI compile error: the `malloc_zone_pressure_relief` FFI block added in 2.11.1 was a bare `extern "C"`, which Rust 2024 rejects (`extern blocks must be unsafe`). Changed to `unsafe extern "C"`.
+
 ## [2.11.1] - 2026-04-20 -- macOS memory: diagnostic-map prune + libmalloc pressure-relief.
 
 * macOS memory: `drop_caches()` now calls `malloc_zone_pressure_relief(NULL, 0)` so the system allocator actually returns free-listed arenas to the kernel instead of keeping them mapped. Previous `Drop`-based cleanup never touched pages at the malloc-zone layer, so RSS stayed high.

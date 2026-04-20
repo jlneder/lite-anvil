@@ -118,7 +118,7 @@ pub fn drop_caches() {
 /// No-op if the symbol is missing (very old SDKs).
 #[cfg(target_os = "macos")]
 fn macos_release_free_pages() {
-    extern "C" {
+    unsafe extern "C" {
         fn malloc_zone_pressure_relief(
             zone: *mut libc::c_void,
             goal: libc::size_t,
